@@ -1,5 +1,7 @@
 # PR Wrangler
 
+<img width="506" height="356" alt="Loading Screen" src="https://github.com/user-attachments/assets/851017e4-3714-43af-8b67-27af88b5a706" />
+
 PR Wrangler is a terminal UI for triaging and acting on GitHub pull requests. It uses the `gh` CLI to discover PRs, classifies each PR into actionable states like `Fix CI`, `Address feedback`, or `Resolve conflicts`, and launches task-focused tmux sessions for follow-up work.
 
 ## Requirements
