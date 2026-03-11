@@ -1,0 +1,6 @@
+pr-wrangler
+coverage.out
+coverage.html
+.DS_Store
+repomix.xml
+.claude/
