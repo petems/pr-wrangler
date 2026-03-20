@@ -7,9 +7,12 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	gh "github.com/google/go-github/v72/github"
 )
 
-// CommandRunner abstracts shell command execution for testability
+// CommandRunner abstracts shell command execution for testability.
+// Retained for tmux and git operations; GitHub API calls now use go-github.
 type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -21,7 +24,6 @@ func (e *ExecRunner) Run(ctx context.Context, name string, args ...string) ([]by
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		// Include stderr in the error message if available
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
 		}
@@ -29,17 +31,45 @@ func (e *ExecRunner) Run(ctx context.Context, name string, args ...string) ([]by
 	return out, err
 }
 
-// GHClient interacts with the gh CLI
+// GHClient interacts with the GitHub API using go-github.
 type GHClient struct {
 	Runner CommandRunner
+	client *gh.Client
+	token  string
 }
 
-func NewGHClient() *GHClient {
-	return &GHClient{Runner: &ExecRunner{}}
+// NewGHClient creates a GHClient with a token resolved from the standard chain.
+func NewGHClient() (*GHClient, error) {
+	token, source, err := ResolveToken()
+	if err != nil {
+		return nil, err
+	}
+	if token == "" {
+		return nil, fmt.Errorf("no GitHub token found. Run 'pr-wrangler auth login' to authenticate, or set GITHUB_TOKEN/GH_TOKEN env var")
+	}
+	_ = source // Could log this later
+
+	return NewGHClientWithToken(token), nil
 }
 
-// prViewFields are the fields requested from gh pr view (works with PR URLs, no repo context needed)
-var prViewFields = "number,title,state,isDraft,url,headRefName,headRefOid,author,reviewDecision,statusCheckRollup,labels,mergeable"
+// NewGHClientWithToken creates a GHClient with an explicit token.
+func NewGHClientWithToken(token string) *GHClient {
+	return &GHClient{
+		Runner: &ExecRunner{},
+		client: gh.NewClient(nil).WithAuthToken(token),
+		token:  token,
+	}
+}
+
+// Token returns the token used by this client (for passing to subprocesses).
+func (c *GHClient) Token() string {
+	return c.token
+}
+
+// Client returns the underlying go-github client.
+func (c *GHClient) Client() *gh.Client {
+	return c.client
+}
 
 // searchResult holds the minimal data from the GitHub Search API
 type searchResult struct {
@@ -51,18 +81,192 @@ type searchResult struct {
 	Labels            []string
 }
 
-// apiSearchResponse mirrors the GitHub Search API response for issues/PRs
-type apiSearchResponse struct {
-	Items []struct {
-		HTMLURL       string `json:"html_url"`
-		Number        int    `json:"number"`
-		State         string `json:"state"`
-		Draft         bool   `json:"draft"`
-		RepositoryURL string `json:"repository_url"`
-		Labels        []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
-	} `json:"items"`
+// searchPRs uses the GitHub Search API via go-github.
+func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult, error) {
+	fullQuery := query + " is:pr"
+
+	opts := &gh.SearchOptions{
+		Sort:  "updated",
+		Order: "desc",
+		ListOptions: gh.ListOptions{
+			PerPage: 50,
+		},
+	}
+
+	issueResult, _, err := c.client.Search.Issues(ctx, fullQuery, opts)
+	if err != nil {
+		return nil, fmt.Errorf("searching PRs: %w", err)
+	}
+
+	results := make([]searchResult, 0, len(issueResult.Issues))
+	for _, issue := range issueResult.Issues {
+		sr := searchResult{
+			URL:    issue.GetHTMLURL(),
+			Number: issue.GetNumber(),
+			State:  issue.GetState(),
+		}
+
+		// Extract owner/repo from the repository URL
+		if issue.RepositoryURL != nil {
+			sr.RepoNameWithOwner = repoNameFromAPIURL(issue.GetRepositoryURL())
+		}
+
+		// Pull request details for draft status
+		if issue.PullRequestLinks != nil {
+			// Search API doesn't directly expose draft; we'll get it in the detail fetch
+			sr.IsDraft = false
+		}
+
+		for _, l := range issue.Labels {
+			sr.Labels = append(sr.Labels, l.GetName())
+		}
+
+		results = append(results, sr)
+	}
+
+	return results, nil
+}
+
+// fetchPRDetail fetches full PR details using go-github.
+func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number int) (PR, error) {
+	pr, _, err := c.client.PullRequests.Get(ctx, owner, repo, number)
+	if err != nil {
+		return PR{}, fmt.Errorf("fetching PR #%d: %w", number, err)
+	}
+
+	result := PR{
+		Number:         pr.GetNumber(),
+		Title:          pr.GetTitle(),
+		URL:            pr.GetHTMLURL(),
+		Author:         pr.GetUser().GetLogin(),
+		HeadRefName:    pr.GetHead().GetRef(),
+		HeadCommitOID:  pr.GetHead().GetSHA(),
+		State:          PRState(strings.ToUpper(pr.GetState())),
+		IsDraft:        pr.GetDraft(),
+		Mergeable:      strings.ToUpper(pr.GetMergeableState()),
+		RepoNameWithOwner: owner + "/" + repo,
+	}
+
+	for _, l := range pr.Labels {
+		result.Labels = append(result.Labels, l.GetName())
+	}
+
+	// Fetch reviews for review decision
+	reviews, _, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, &gh.ListOptions{PerPage: 100})
+	if err == nil {
+		for _, rev := range reviews {
+			result.Reviews = append(result.Reviews, Review{
+				Author: rev.GetUser().GetLogin(),
+				State:  rev.GetState(),
+			})
+		}
+		result.ReviewDecision = deriveReviewDecision(result.Reviews)
+	}
+
+	// Fetch check runs for CI status
+	ref := pr.GetHead().GetSHA()
+	if ref != "" {
+		checkResult, _, err := c.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, &gh.ListCheckRunsOptions{
+			ListOptions: gh.ListOptions{PerPage: 100},
+		})
+		if err == nil && checkResult != nil {
+			for _, check := range checkResult.CheckRuns {
+				result.StatusChecks = append(result.StatusChecks, StatusCheck{
+					Name:       check.GetName(),
+					Status:     check.GetStatus(),
+					Conclusion: CIConclusion(strings.ToUpper(check.GetConclusion())),
+				})
+			}
+			result.LatestCheckState = deriveCheckState(result.StatusChecks)
+		}
+	}
+
+	// Map mergeable state
+	result.Mergeable = mapMergeableState(pr)
+
+	return result, nil
+}
+
+// deriveReviewDecision determines the overall review decision from individual reviews.
+func deriveReviewDecision(reviews []Review) ReviewDecision {
+	if len(reviews) == 0 {
+		return ReviewDecisionReviewRequired
+	}
+
+	// Track latest review per author
+	latest := make(map[string]string)
+	for _, r := range reviews {
+		latest[r.Author] = r.State
+	}
+
+	hasApproval := false
+	hasChangesRequested := false
+	for _, state := range latest {
+		switch state {
+		case "APPROVED":
+			hasApproval = true
+		case "CHANGES_REQUESTED":
+			hasChangesRequested = true
+		}
+	}
+
+	if hasChangesRequested {
+		return ReviewDecisionChangesRequested
+	}
+	if hasApproval {
+		return ReviewDecisionApproved
+	}
+	return ReviewDecisionReviewRequired
+}
+
+// deriveCheckState computes the overall CI check state.
+func deriveCheckState(checks []StatusCheck) string {
+	if len(checks) == 0 {
+		return ""
+	}
+
+	allSuccess := true
+	anyFailure := false
+
+	for _, check := range checks {
+		if check.Status != "completed" {
+			allSuccess = false
+			continue
+		}
+		conclusion := strings.ToUpper(string(check.Conclusion))
+		if conclusion != "SUCCESS" && conclusion != "NEUTRAL" && conclusion != "SKIPPED" {
+			anyFailure = true
+		}
+	}
+
+	if anyFailure {
+		return "FAILURE"
+	}
+	if allSuccess {
+		return "SUCCESS"
+	}
+	return "PENDING"
+}
+
+// mapMergeableState converts go-github's MergeableState to our format.
+func mapMergeableState(pr *gh.PullRequest) string {
+	if pr.MergeableState != nil {
+		switch strings.ToUpper(*pr.MergeableState) {
+		case "DIRTY":
+			return string(MergeableConflicting)
+		case "CLEAN", "HAS_HOOKS", "UNSTABLE":
+			return string(MergeableMergeable)
+		default:
+			return string(MergeableUnknown)
+		}
+	}
+	if pr.Mergeable != nil {
+		if *pr.Mergeable {
+			return string(MergeableMergeable)
+		}
+		return string(MergeableConflicting)
+	}
+	return string(MergeableUnknown)
 }
 
 // repoNameFromAPIURL extracts "Owner/Repo" from "https://api.github.com/repos/Owner/Repo"
@@ -74,43 +278,78 @@ func repoNameFromAPIURL(apiURL string) string {
 	return ""
 }
 
-// searchPRs uses the GitHub Search API to find PRs matching the query.
-// This works without being in a git repository.
-func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult, error) {
-	fullQuery := query + " is:pr"
-	out, err := c.Runner.Run(ctx, "gh", "api", "search/issues",
-		"-X", "GET",
-		"-f", "q="+fullQuery,
-		"-f", "per_page=50",
-		"-f", "sort=updated",
-		"-f", "order=desc",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("searching PRs: %w", err)
+// splitOwnerRepo splits "owner/repo" into its parts.
+func splitOwnerRepo(nwo string) (string, string, error) {
+	parts := strings.SplitN(nwo, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repo format %q (expected owner/repo)", nwo)
 	}
-
-	var resp apiSearchResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parsing search results: %w", err)
-	}
-
-	results := make([]searchResult, len(resp.Items))
-	for i, item := range resp.Items {
-		results[i] = searchResult{
-			URL:               item.HTMLURL,
-			Number:            item.Number,
-			RepoNameWithOwner: repoNameFromAPIURL(item.RepositoryURL),
-			State:             item.State,
-			IsDraft:           item.Draft,
-		}
-		for _, l := range item.Labels {
-			results[i].Labels = append(results[i].Labels, l.Name)
-		}
-	}
-	return results, nil
+	return parts[0], parts[1], nil
 }
 
-// ParsePRViewOutput parses the JSON output of gh pr view --json
+// FetchPRs discovers PRs matching the query and fetches full details for each.
+func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
+	if query == "" {
+		query = "author:@me is:open"
+	}
+
+	results, err := c.searchPRs(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	type indexedPR struct {
+		idx int
+		pr  PR
+		err error
+	}
+
+	ch := make(chan indexedPR, len(results))
+	var wg sync.WaitGroup
+
+	for i, sr := range results {
+		wg.Add(1)
+		go func(idx int, sr searchResult) {
+			defer wg.Done()
+
+			owner, repo, err := splitOwnerRepo(sr.RepoNameWithOwner)
+			if err != nil {
+				ch <- indexedPR{idx: idx, err: err}
+				return
+			}
+
+			pr, err := c.fetchPRDetail(ctx, owner, repo, sr.Number)
+			if err != nil {
+				ch <- indexedPR{idx: idx, err: err}
+				return
+			}
+
+			ch <- indexedPR{idx: idx, pr: pr}
+		}(i, sr)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	prs := make([]PR, len(results))
+	for result := range ch {
+		if result.err != nil {
+			return nil, result.err
+		}
+		prs[result.idx] = result.pr
+	}
+
+	return prs, nil
+}
+
+// ParsePRViewOutput parses the JSON output of gh pr view --json.
+// Retained for backward compatibility with tests and any remaining gh CLI usage.
 func ParsePRViewOutput(data []byte) (PR, error) {
 	var raw struct {
 		Number int    `json:"number"`
@@ -177,69 +416,4 @@ func ParsePRViewOutput(data []byte) (PR, error) {
 	}
 
 	return pr, nil
-}
-
-// FetchPRs uses the GitHub Search API to discover PRs, then fetches full details
-// for each via gh pr view. Works from any directory (no git repo needed).
-func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
-	if query == "" {
-		query = "author:@me is:open"
-	}
-
-	results, err := c.searchPRs(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	type indexedPR struct {
-		idx int
-		pr  PR
-		err error
-	}
-
-	ch := make(chan indexedPR, len(results))
-	var wg sync.WaitGroup
-
-	for i, sr := range results {
-		wg.Add(1)
-		go func(idx int, sr searchResult) {
-			defer wg.Done()
-
-			out, err := c.Runner.Run(ctx, "gh", "pr", "view", sr.URL,
-				"--json", prViewFields,
-			)
-			if err != nil {
-				ch <- indexedPR{idx: idx, err: fmt.Errorf("fetching PR %s: %w", sr.URL, err)}
-				return
-			}
-
-			pr, err := ParsePRViewOutput(out)
-			if err != nil {
-				ch <- indexedPR{idx: idx, err: fmt.Errorf("parsing PR %s: %w", sr.URL, err)}
-				return
-			}
-			pr.RepoNameWithOwner = sr.RepoNameWithOwner
-
-			ch <- indexedPR{idx: idx, pr: pr}
-		}(i, sr)
-	}
-
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	prs := make([]PR, len(results))
-	for result := range ch {
-		if result.err != nil {
-			return nil, result.err
-		}
-		prs[result.idx] = result.pr
-	}
-
-	return prs, nil
 }

@@ -22,6 +22,7 @@ type Config struct {
 	RepoBaseDir        string            `yaml:"repo_base_dir"`
 	ServiceLabelPrefix string            `yaml:"service_label_prefix"`
 	AgentCommands      map[string]string `yaml:"agent_commands"`
+	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
 }
 
 // DefaultConfig returns a config with a single default view and generalized defaults
@@ -35,6 +36,7 @@ func DefaultConfig() Config {
 			"fix-ci":            "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate the failing checks, identify the root cause, and fix the issues.'",
 			"address-feedback":  "claude --permission-mode acceptEdits 'This PR has review feedback that needs to be addressed: {{pr_url}} - Read the review comments and make the requested changes.'",
 			"resolve-conflicts": "claude --permission-mode acceptEdits 'This PR has merge conflicts: {{pr_url}} - Resolve the conflicts while preserving the intended changes.'",
+			"review-comments":   "claude --permission-mode acceptEdits '/pr-wrangler-review-comments {{pr_url}}'",
 			"followup":          "claude --permission-mode acceptEdits 'Continue working on this PR: {{pr_url}} - Review the current state, check for any issues, and make progress on remaining work.'",
 		},
 	}
