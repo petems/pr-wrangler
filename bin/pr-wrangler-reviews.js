@@ -101,6 +101,10 @@ function parseArgs() {
       }
       case "--pr":
       case "-p":
+        if (i + 1 >= args.length) {
+          console.error("Error: --pr requires a number");
+          process.exit(1);
+        }
         result.prNumber = Number.parseInt(args[++i], 10);
         break;
       case "--json":
@@ -117,6 +121,10 @@ function parseArgs() {
         break;
       case "--detail":
       case "-d":
+        if (i + 1 >= args.length) {
+          console.error("Error: --detail requires a comment ID");
+          process.exit(1);
+        }
         result.command = "detail";
         result.detail = args[++i];
         break;
@@ -127,10 +135,18 @@ function parseArgs() {
         break;
       case "--interval":
       case "-i":
+        if (i + 1 >= args.length) {
+          console.error("Error: --interval requires a number");
+          process.exit(1);
+        }
         result.watchInterval = Number.parseInt(args[++i], 10);
         break;
       case "--exit-after":
       case "--timeout":
+        if (i + 1 >= args.length) {
+          console.error("Error: --timeout requires a number");
+          process.exit(1);
+        }
         result.watchTimeout = Number.parseInt(args[++i], 10);
         break;
       case "--expanded":
@@ -330,16 +346,23 @@ async function watchForComments(context, options) {
       await sleep(5);
 
       // Re-fetch to catch any comments posted during the grace period
-      const graceData = await fetchPRComments(
-        owner,
-        repo,
-        prNumber,
-        token,
-        proxyFetch
-      );
-      const graceProcessed = processComments(graceData);
-      const graceFiltered = filterComments(graceProcessed, options);
-      const lateComments = graceFiltered.filter((c) => !seenIds.has(c.id));
+      let lateComments = [];
+      try {
+        const graceData = await fetchPRComments(
+          owner,
+          repo,
+          prNumber,
+          token,
+          proxyFetch
+        );
+        const graceProcessed = processComments(graceData);
+        const graceFiltered = filterComments(graceProcessed, options);
+        lateComments = graceFiltered.filter((c) => !seenIds.has(c.id));
+      } catch (error) {
+        console.log(
+          `${colors.yellow}[${formatTimestamp()}] Grace period fetch failed: ${error.message}${colors.reset}`
+        );
+      }
 
       for (const comment of lateComments) {
         seenIds.add(comment.id);
