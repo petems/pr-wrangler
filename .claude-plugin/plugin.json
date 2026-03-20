@@ -1,0 +1,13 @@
+{
+  "name": "pr-wrangler",
+  "description": "Manage GitHub PR review comments. Automatically triage, fix, and respond to review findings.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Peter Souter",
+    "url": "https://github.com/petems"
+  },
+  "homepage": "https://github.com/petems/pr-wrangler",
+  "repository": "https://github.com/petems/pr-wrangler",
+  "license": "MIT",
+  "keywords": ["github", "pull-request", "code-review", "claude-code", "ai-agent", "review-bot"]
+}
