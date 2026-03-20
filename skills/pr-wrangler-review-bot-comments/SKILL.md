@@ -30,7 +30,7 @@ This shows only unanswered bot comments with full detail: complete comment body 
 
 If zero comments are returned, print "No unanswered bot comments found" and skip to Phase 2.
 
-### Step 3: Process Each Unanswered Comment
+### Step 2: Process Each Unanswered Comment
 
 For each comment from the expanded output:
 
@@ -71,9 +71,9 @@ Read the referenced code and determine:
 
 **If UNCERTAIN:** Ask the user. If they say skip, track it as skipped.
 
-Do NOT reply to comments yet. Replies happen after the commit (Step 5).
+Do NOT reply to comments yet. Replies happen after the commit (Step 4).
 
-### Step 4: Commit and Push
+### Step 3: Commit and Push
 
 After evaluating and fixing ALL unanswered comments:
 
@@ -88,7 +88,7 @@ After evaluating and fixing ALL unanswered comments:
    ```
 3. Capture the commit hash from the output.
 
-### Step 5: Reply to All Comments
+### Step 4: Reply to All Comments
 
 Now that the commit hash exists, reply to every processed comment. The `--resolve` flag marks the review thread as resolved on GitHub.
 
@@ -112,22 +112,22 @@ Run `npx pr-wrangler-reviews --reply <comment_id> "Skipped per user request" --r
 
 The watcher exits immediately when new comments are found (after a 5s grace period to catch batch posts). This means you run it in a loop: start watcher, process any comments it returns, restart watcher, repeat until the watcher times out with no new comments.
 
-### Step 6: Start Watcher Loop
+### Step 5: Start Watcher Loop
 
 Repeat the following until the watcher exits with no new comments:
 
-**6a.** Launch the watcher in the background:
+**5a.** Launch the watcher in the background:
 
 Run `npx pr-wrangler-reviews --watch --bots-only` as a background task.
 
-**6b.** Wait for the background command to complete (default 10 minutes; override with `--timeout`).
+**5b.** Wait for the background command to complete (default 10 minutes; override with `--timeout`).
 
-**6c.** Check the output:
+**5c.** Check the output:
 
 - **If new comments were found** (output contains `EXITING WITH NEW COMMENTS`):
   1. Use `--detail <id>` to read each new comment's full detail
   2. Process them exactly as in Phase 1, Steps 3-5 (evaluate, fix, commit, push, reply)
-  3. **Go back to Step 6a** to restart the watcher
+  3. **Go back to Step 5a** to restart the watcher
 
 - **If no new comments** (output contains `WATCH COMPLETE`):
   Stop looping and move to the Summary Report.

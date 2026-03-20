@@ -17,6 +17,7 @@ const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "skills");
 const DEST = path.join(ROOT, ".claude", "skills");
 const LOCAL_CLI = path.join(ROOT, "bin", "pr-wrangler-reviews.js");
+const LOCAL_CLI_QUOTED = `"${LOCAL_CLI.replace(/(["\\$`])/g, "\\$1")}"`;
 
 const SKILL_DIRS = ["pr-wrangler-review-comments", "pr-wrangler-review-bot-comments", "pr-wrangler-review-human-comments"];
 
@@ -29,10 +30,10 @@ for (const name of SKILL_DIRS) {
   let content = fs.readFileSync(path.join(SRC, name, "SKILL.md"), "utf8");
 
   // Patch all package runner references to use local CLI binary
-  content = content.replaceAll("npx pr-wrangler-reviews", `node ${LOCAL_CLI}`);
-  content = content.replaceAll("pnpm dlx pr-wrangler-reviews", `node ${LOCAL_CLI}`);
-  content = content.replaceAll("yarn dlx pr-wrangler-reviews", `node ${LOCAL_CLI}`);
-  content = content.replaceAll("bunx pr-wrangler-reviews", `node ${LOCAL_CLI}`);
+  content = content.replaceAll("npx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
+  content = content.replaceAll("pnpm dlx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
+  content = content.replaceAll("yarn dlx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
+  content = content.replaceAll("bunx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
 
   // Deduplicate allowed-tools after patching (all runners become the same)
   content = content.replace(

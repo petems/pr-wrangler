@@ -35,6 +35,7 @@ const {
 const {
   findPRForBranch,
   fetchPRComments,
+  fetchThreadResolutionMap,
   processComments,
   filterComments,
   replyToComment,
@@ -289,19 +290,28 @@ async function watchForComments(context, options) {
     await sleep(options.watchInterval);
     pollCount++;
 
-    const rawData = await fetchPRComments(
-      owner,
-      repo,
-      prNumber,
-      token,
-      proxyFetch
-    );
-    const processed = processComments(rawData);
-    const filtered = filterComments(processed, options);
+    let rawData, processed, filtered;
+    try {
+      rawData = await fetchPRComments(
+        owner,
+        repo,
+        prNumber,
+        token,
+        proxyFetch
+      );
+      processed = processComments(rawData);
+      filtered = filterComments(processed, options);
+    } catch (error) {
+      console.log(
+        `${colors.yellow}[${formatTimestamp()}] Poll #${pollCount}: Error fetching comments: ${error.message}${colors.reset}`
+      );
+      continue;
+    }
 
     const newComments = filtered.filter((c) => !seenIds.has(c.id));
 
     if (newComments.length > 0) {
+      lastActivityTime = Date.now();
       for (const comment of newComments) {
         seenIds.add(comment.id);
       }
@@ -528,14 +538,11 @@ async function main() {
       process.exit(1);
     }
 
-    const rawData = await fetchPRComments(
-      repoInfo.owner,
-      repoInfo.repo,
-      prNumber,
-      token,
-      proxyFetch
-    );
-    const processed = processComments(rawData);
+    const [rawData, resolutionMap] = await Promise.all([
+      fetchPRComments(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+      fetchThreadResolutionMap(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+    ]);
+    const processed = processComments(rawData, { resolutionMap });
     const targetId = Number(options.detail);
     const comment = processed.find((c) => c.id === targetId);
 
@@ -565,15 +572,12 @@ async function main() {
   }
 
   // Default: fetch and display comments
-  const rawData = await fetchPRComments(
-    repoInfo.owner,
-    repoInfo.repo,
-    prNumber,
-    token,
-    proxyFetch
-  );
+  const [rawData, resolutionMap] = await Promise.all([
+    fetchPRComments(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+    fetchThreadResolutionMap(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+  ]);
 
-  const processed = processComments(rawData);
+  const processed = processComments(rawData, { resolutionMap });
   const filtered = filterComments(processed, options);
 
   console.log(formatOutput(filtered, options));
