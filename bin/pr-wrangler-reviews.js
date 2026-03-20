@@ -275,14 +275,11 @@ async function watchForComments(context, options) {
   );
 
   // Initial fetch to populate seen IDs
-  const initialData = await fetchPRComments(
-    owner,
-    repo,
-    prNumber,
-    token,
-    proxyFetch
-  );
-  const initialProcessed = processComments(initialData);
+  const [initialData, initialResolutionMap] = await Promise.all([
+    fetchPRComments(owner, repo, prNumber, token, proxyFetch),
+    fetchThreadResolutionMap(owner, repo, prNumber, token, proxyFetch),
+  ]);
+  const initialProcessed = processComments(initialData, { resolutionMap: initialResolutionMap });
   const initialFiltered = filterComments(initialProcessed, options);
 
   for (const comment of initialFiltered) {
@@ -306,16 +303,13 @@ async function watchForComments(context, options) {
     await sleep(options.watchInterval);
     pollCount++;
 
-    let rawData, processed, filtered;
+    let rawData, resolutionMap, processed, filtered;
     try {
-      rawData = await fetchPRComments(
-        owner,
-        repo,
-        prNumber,
-        token,
-        proxyFetch
-      );
-      processed = processComments(rawData);
+      [rawData, resolutionMap] = await Promise.all([
+        fetchPRComments(owner, repo, prNumber, token, proxyFetch),
+        fetchThreadResolutionMap(owner, repo, prNumber, token, proxyFetch),
+      ]);
+      processed = processComments(rawData, { resolutionMap });
       filtered = filterComments(processed, options);
     } catch (error) {
       console.log(
@@ -348,14 +342,11 @@ async function watchForComments(context, options) {
       // Re-fetch to catch any comments posted during the grace period
       let lateComments = [];
       try {
-        const graceData = await fetchPRComments(
-          owner,
-          repo,
-          prNumber,
-          token,
-          proxyFetch
-        );
-        const graceProcessed = processComments(graceData);
+        const [graceData, graceResolutionMap] = await Promise.all([
+          fetchPRComments(owner, repo, prNumber, token, proxyFetch),
+          fetchThreadResolutionMap(owner, repo, prNumber, token, proxyFetch),
+        ]);
+        const graceProcessed = processComments(graceData, { resolutionMap: graceResolutionMap });
         const graceFiltered = filterComments(graceProcessed, options);
         lateComments = graceFiltered.filter((c) => !seenIds.has(c.id));
       } catch (error) {
