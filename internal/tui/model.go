@@ -461,7 +461,8 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 	// Prefix with GITHUB_TOKEN so the JS CLI (and any subprocess) uses our managed token
 	tokenPrefix := ""
 	if m.ghClient.Token() != "" {
-		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", m.ghClient.Token())
+		escapedToken := strings.ReplaceAll(m.ghClient.Token(), "'", "'\"'\"'")
+		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", escapedToken)
 	}
 
 	cmd := strings.ReplaceAll(cmdTemplate, "{{pr_url}}", r.PR.URL)

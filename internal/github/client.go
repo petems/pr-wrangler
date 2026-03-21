@@ -142,9 +142,15 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		HeadRefName:    pr.GetHead().GetRef(),
 		HeadCommitOID:  pr.GetHead().GetSHA(),
 		State:          PRState(strings.ToUpper(pr.GetState())),
+		MergedAt:       pr.MergedAt.GetTime(),
 		IsDraft:        pr.GetDraft(),
 		Mergeable:      strings.ToUpper(pr.GetMergeableState()),
 		RepoNameWithOwner: owner + "/" + repo,
+	}
+
+	// Distinguish merged PRs from closed ones
+	if pr.GetMerged() {
+		result.State = PRStateMerged
 	}
 
 	for _, l := range pr.Labels {
@@ -177,8 +183,21 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 					Conclusion: CIConclusion(strings.ToUpper(check.GetConclusion())),
 				})
 			}
-			result.LatestCheckState = deriveCheckState(result.StatusChecks)
 		}
+
+		// Fetch commit statuses (classic status API)
+		combinedStatus, _, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, &gh.ListOptions{PerPage: 100})
+		if err == nil && combinedStatus != nil {
+			for _, status := range combinedStatus.Statuses {
+				result.StatusChecks = append(result.StatusChecks, StatusCheck{
+					Name:       status.GetContext(),
+					Status:     "completed",
+					Conclusion: CIConclusion(strings.ToUpper(status.GetState())),
+				})
+			}
+		}
+
+		result.LatestCheckState = deriveCheckState(result.StatusChecks)
 	}
 
 	// Map mergeable state

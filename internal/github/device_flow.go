@@ -37,6 +37,8 @@ type AccessTokenResponse struct {
 	ErrorDesc   string `json:"error_description"`
 }
 
+var authHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 // RequestDeviceCode initiates the device flow by requesting a device code from GitHub.
 func RequestDeviceCode(cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
 	data := url.Values{
@@ -51,7 +53,7 @@ func RequestDeviceCode(cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("requesting device code: %w", err)
 	}
@@ -106,7 +108,7 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Accept", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := authHTTPClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("polling for token: %w", err)
 		}
@@ -140,7 +142,7 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 		case "unsupported_grant_type":
 			return nil, fmt.Errorf("OAuth error: unsupported grant type (this is a bug in pr-wrangler)")
 		case "incorrect_client_credentials":
-			return nil, fmt.Errorf("OAuth error: invalid client ID — check PR_WRANGLER_CLIENT_ID")
+			return nil, fmt.Errorf("OAuth error: invalid client ID — check PR_WRANGLER_CLIENT_ID env var or oauth_client_id in config file")
 		case "incorrect_device_code":
 			return nil, fmt.Errorf("OAuth error: invalid device code (this is a bug in pr-wrangler)")
 		case "device_flow_disabled":
@@ -163,7 +165,7 @@ func FetchAuthenticatedUser(token string) (string, error) {
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	req.Header.Set("User-Agent", "pr-wrangler")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetching user: %w", err)
 	}

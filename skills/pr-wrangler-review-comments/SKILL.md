@@ -2,7 +2,7 @@
 name: pr-wrangler-review-comments
 description: Resolve all PR review comments (human and bot) on current PR. Fetches unanswered comments, evaluates each one, fixes real issues, dismisses false positives, and replies to every comment with the outcome.
 license: MIT
-compatibility: Requires git, gh (GitHub CLI), and Node.js installed.
+compatibility: Requires git and Node.js. gh (GitHub CLI) is optional — authentication also works via GITHUB_TOKEN/GH_TOKEN env vars or stored OAuth tokens.
 allowed-tools: Bash(npx pr-wrangler-reviews *) Bash(pnpm dlx pr-wrangler-reviews *) Bash(yarn dlx pr-wrangler-reviews *) Bash(bunx pr-wrangler-reviews *) Bash(git config *) Bash(git add *) Bash(git commit *) Bash(git push *)
 metadata:
   author: petems
@@ -24,7 +24,7 @@ All commands below use `npx pr-wrangler-reviews`. If the project uses a differen
 
 Run `npx pr-wrangler-reviews --unanswered --expanded`
 
-The CLI auto-detects the current branch, finds the associated PR, and authenticates via `gh` CLI or environment variables. If anything fails (no token, no PR, CLI not installed), it exits with a clear error message.
+The CLI auto-detects the current branch, finds the associated PR, and authenticates via environment variables (GITHUB_TOKEN/GH_TOKEN), stored OAuth tokens, or gh CLI as fallback. If anything fails (no token, no PR, CLI not installed), it exits with a clear error message.
 
 This shows all unanswered comments (both human and bot) with full detail: complete comment body (no truncation), diff hunk (code context), and all replies. Each comment shows its ID in brackets (e.g., `[12345678]`).
 
@@ -157,7 +157,7 @@ Run `npx pr-wrangler-reviews --watch` as a background task.
 
 - **If new comments were found** (output contains `EXITING WITH NEW COMMENTS`):
   1. Use `--detail <id>` to read each new comment's full detail
-  2. Process them exactly as in Phase 1, Steps 3-5 (evaluate, fix, commit, push, reply)
+  2. Process them exactly as in Phase 1, Steps 2-4 (evaluate, fix, commit, push, reply)
   3. **Go back to Step 5a** to restart the watcher
 
 - **If no new comments** (output contains `WATCH COMPLETE`):

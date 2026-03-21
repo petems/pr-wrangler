@@ -102,7 +102,7 @@ function parseArgs() {
       case "--pr":
       case "-p":
         if (i + 1 >= args.length) {
-          console.error("Error: --pr requires a number");
+          console.error("Error: --pr requires a PR number");
           process.exit(1);
         }
         result.prNumber = Number.parseInt(args[++i], 10);
@@ -134,21 +134,33 @@ function parseArgs() {
         result.command = "watch";
         break;
       case "--interval":
-      case "-i":
+      case "-i": {
         if (i + 1 >= args.length) {
           console.error("Error: --interval requires a number");
           process.exit(1);
         }
-        result.watchInterval = Number.parseInt(args[++i], 10);
+        const interval = Number.parseInt(args[++i], 10);
+        if (isNaN(interval) || interval <= 0) {
+          console.error("Error: --interval must be a positive number");
+          process.exit(1);
+        }
+        result.watchInterval = interval;
         break;
+      }
       case "--exit-after":
-      case "--timeout":
+      case "--timeout": {
         if (i + 1 >= args.length) {
           console.error("Error: --timeout requires a number");
           process.exit(1);
         }
-        result.watchTimeout = Number.parseInt(args[++i], 10);
+        const timeout = Number.parseInt(args[++i], 10);
+        if (isNaN(timeout) || timeout <= 0) {
+          console.error("Error: --timeout must be a positive number");
+          process.exit(1);
+        }
+        result.watchTimeout = timeout;
         break;
+      }
       case "--expanded":
       case "-e":
         result.expanded = true;
@@ -476,6 +488,11 @@ async function main() {
 
     prNumber = pr.number;
     prUrl = pr.html_url;
+  }
+
+  // Build PR URL if not already set
+  if (!prUrl && prNumber) {
+    prUrl = `https://github.com/${repoInfo.owner}/${repoInfo.repo}/pull/${prNumber}`;
   }
 
   // Handle reply command

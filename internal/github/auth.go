@@ -83,6 +83,10 @@ func SaveToken(info *TokenInfo) error {
 		return fmt.Errorf("writing auth file: %w", err)
 	}
 
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("setting auth file permissions: %w", err)
+	}
+
 	return nil
 }
 

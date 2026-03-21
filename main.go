@@ -188,15 +188,17 @@ func runAuthStatus() {
 	fmt.Printf("Authenticated (source: %s)\n", source)
 
 	// If using stored token, show additional info
-	info, err := github.LoadToken()
-	if err == nil && info != nil && info.User != "" {
-		fmt.Printf("User: %s\n", info.User)
-		fmt.Printf("Scopes: %v\n", info.Scopes)
-		if !info.CreatedAt.IsZero() {
-			fmt.Printf("Authenticated at: %s\n", info.CreatedAt.Format("2006-01-02 15:04:05"))
-		}
-		if !info.ExpiresAt.IsZero() {
-			fmt.Printf("Expires at: %s\n", info.ExpiresAt.Format("2006-01-02 15:04:05"))
+	if source == "pr-wrangler auth" {
+		info, err := github.LoadToken()
+		if err == nil && info != nil && info.User != "" {
+			fmt.Printf("User: %s\n", info.User)
+			fmt.Printf("Scopes: %v\n", info.Scopes)
+			if !info.CreatedAt.IsZero() {
+				fmt.Printf("Authenticated at: %s\n", info.CreatedAt.Format("2006-01-02 15:04:05"))
+			}
+			if !info.ExpiresAt.IsZero() {
+				fmt.Printf("Expires at: %s\n", info.ExpiresAt.Format("2006-01-02 15:04:05"))
+			}
 		}
 	}
 
