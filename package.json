@@ -1,0 +1,42 @@
+{
+  "name": "pr-wrangler-reviews",
+  "version": "1.0.0",
+  "description": "CLI and agent skills for managing GitHub PR review comments. List, filter, reply, and watch for bot findings. Based on agent-reviews by Paul Bakaus.",
+  "license": "MIT",
+  "author": "Peter Souter",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/petems/pr-wrangler.git"
+  },
+  "keywords": [
+    "github",
+    "pull-request",
+    "code-review",
+    "cli",
+    "ai-agent",
+    "agent-skill",
+    "pr-comments",
+    "review-bot"
+  ],
+  "bin": {
+    "pr-wrangler-reviews": "bin/pr-wrangler-reviews.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "skills/",
+    ".claude-plugin/"
+  ],
+  "scripts": {
+    "install-skills": "node scripts/install-skills.js",
+    "prepare": "node scripts/install-skills.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
+}

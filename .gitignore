@@ -4,3 +4,4 @@ coverage.html
 .DS_Store
 repomix.xml
 .claude/
+node_modules/

@@ -1,0 +1,26 @@
+{
+  "name": "pr-wrangler",
+  "owner": {
+    "name": "Peter Souter"
+  },
+  "metadata": {
+    "description": "CLI and Claude Code skills for managing GitHub PR review comments"
+  },
+  "plugins": [
+    {
+      "name": "pr-wrangler-review-comments",
+      "source": "./",
+      "description": "Resolve all PR review comments (human and bot) on the current PR"
+    },
+    {
+      "name": "pr-wrangler-review-bot-comments",
+      "source": "./",
+      "description": "Resolve PR review bot findings (Copilot, Cursor Bugbot, etc.) on the current PR"
+    },
+    {
+      "name": "pr-wrangler-review-human-comments",
+      "source": "./",
+      "description": "Resolve human PR review comments on the current PR"
+    }
+  ]
+}
