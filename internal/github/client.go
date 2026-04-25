@@ -52,12 +52,8 @@ func (c *GHClient) Client() *gh.Client {
 
 // searchResult holds the minimal data from the GitHub Search API
 type searchResult struct {
-	URL               string
 	Number            int
 	RepoNameWithOwner string
-	State             string
-	IsDraft           bool
-	Labels            []string
 }
 
 // searchPRs uses the GitHub Search API via go-github.
@@ -81,24 +77,12 @@ func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult,
 
 		for _, issue := range issueResult.Issues {
 			sr := searchResult{
-				URL:    issue.GetHTMLURL(),
 				Number: issue.GetNumber(),
-				State:  issue.GetState(),
 			}
 
 			// Extract owner/repo from the repository URL
 			if issue.RepositoryURL != nil {
 				sr.RepoNameWithOwner = repoNameFromAPIURL(issue.GetRepositoryURL())
-			}
-
-			// Pull request details for draft status
-			if issue.PullRequestLinks != nil {
-				// Search API doesn't directly expose draft; we'll get it in the detail fetch
-				sr.IsDraft = false
-			}
-
-			for _, l := range issue.Labels {
-				sr.Labels = append(sr.Labels, l.GetName())
 			}
 
 			results = append(results, sr)
@@ -130,7 +114,6 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		State:             PRState(strings.ToUpper(pr.GetState())),
 		MergedAt:          pr.MergedAt.GetTime(),
 		IsDraft:           pr.GetDraft(),
-		Mergeable:         strings.ToUpper(pr.GetMergeableState()),
 		RepoNameWithOwner: owner + "/" + repo,
 	}
 
@@ -148,7 +131,7 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 	for {
 		reviews, resp, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, reviewOpts)
 		if err != nil {
-			break
+			return PR{}, fmt.Errorf("listing reviews for PR #%d: %w", number, err)
 		}
 		for _, rev := range reviews {
 			result.Reviews = append(result.Reviews, Review{
@@ -171,7 +154,10 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		}
 		for {
 			checkResult, resp, err := c.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, checkOpts)
-			if err != nil || checkResult == nil {
+			if err != nil {
+				return PR{}, fmt.Errorf("listing check runs for PR #%d: %w", number, err)
+			}
+			if checkResult == nil {
 				break
 			}
 			for _, check := range checkResult.CheckRuns {
@@ -191,7 +177,10 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		statusOpts := &gh.ListOptions{PerPage: 100}
 		for {
 			combinedStatus, resp, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, statusOpts)
-			if err != nil || combinedStatus == nil {
+			if err != nil {
+				return PR{}, fmt.Errorf("getting combined status for PR #%d: %w", number, err)
+			}
+			if combinedStatus == nil {
 				break
 			}
 			for _, status := range combinedStatus.Statuses {
