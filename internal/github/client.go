@@ -11,6 +11,8 @@ import (
 	gh "github.com/google/go-github/v72/github"
 )
 
+const maxConcurrentPRDetails = 8
+
 // CommandRunner abstracts shell command execution for testability.
 // Retained for tmux and git operations; GitHub API calls now use go-github.
 type CommandRunner interface {
@@ -165,24 +167,36 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 	}
 
 	// Fetch reviews for review decision
-	reviews, _, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, &gh.ListOptions{PerPage: 100})
-	if err == nil {
+	reviewOpts := &gh.ListOptions{PerPage: 100}
+	for {
+		reviews, resp, err := c.client.PullRequests.ListReviews(ctx, owner, repo, number, reviewOpts)
+		if err != nil {
+			break
+		}
 		for _, rev := range reviews {
 			result.Reviews = append(result.Reviews, Review{
 				Author: rev.GetUser().GetLogin(),
 				State:  rev.GetState(),
 			})
 		}
-		result.ReviewDecision = deriveReviewDecision(result.Reviews)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		reviewOpts.Page = resp.NextPage
 	}
+	result.ReviewDecision = deriveReviewDecision(result.Reviews)
 
 	// Fetch check runs for CI status
 	ref := pr.GetHead().GetSHA()
 	if ref != "" {
-		checkResult, _, err := c.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, &gh.ListCheckRunsOptions{
+		checkOpts := &gh.ListCheckRunsOptions{
 			ListOptions: gh.ListOptions{PerPage: 100},
-		})
-		if err == nil && checkResult != nil {
+		}
+		for {
+			checkResult, resp, err := c.client.Checks.ListCheckRunsForRef(ctx, owner, repo, ref, checkOpts)
+			if err != nil || checkResult == nil {
+				break
+			}
 			for _, check := range checkResult.CheckRuns {
 				result.StatusChecks = append(result.StatusChecks, StatusCheck{
 					Name:       check.GetName(),
@@ -190,14 +204,26 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 					Conclusion: CIConclusion(strings.ToUpper(check.GetConclusion())),
 				})
 			}
+			if resp == nil || resp.NextPage == 0 {
+				break
+			}
+			checkOpts.Page = resp.NextPage
 		}
 
 		// Fetch commit statuses (classic status API)
-		combinedStatus, _, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, &gh.ListOptions{PerPage: 100})
-		if err == nil && combinedStatus != nil {
+		statusOpts := &gh.ListOptions{PerPage: 100}
+		for {
+			combinedStatus, resp, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, statusOpts)
+			if err != nil || combinedStatus == nil {
+				break
+			}
 			for _, status := range combinedStatus.Statuses {
 				result.StatusChecks = append(result.StatusChecks, statusCheckFromClassicStatus(status))
 			}
+			if resp == nil || resp.NextPage == 0 {
+				break
+			}
+			statusOpts.Page = resp.NextPage
 		}
 
 		result.LatestCheckState = deriveCheckState(result.StatusChecks)
@@ -321,11 +347,16 @@ func splitOwnerRepo(nwo string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+func prSearchQuery(query string) string {
+	if query == "" {
+		return "author:@me is:open"
+	}
+	return query
+}
+
 // FetchPRs discovers PRs matching the query and fetches full details for each.
 func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
-	if query == "" {
-		query = "author:@me is:open"
-	}
+	query = prSearchQuery(query)
 
 	results, err := c.searchPRs(ctx, query)
 	if err != nil {
@@ -343,12 +374,20 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
 	}
 
 	ch := make(chan indexedPR, len(results))
+	sem := make(chan struct{}, maxConcurrentPRDetails)
 	var wg sync.WaitGroup
 
 	for i, sr := range results {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
 		wg.Add(1)
 		go func(idx int, sr searchResult) {
 			defer wg.Done()
+			defer func() { <-sem }()
 
 			owner, repo, err := splitOwnerRepo(sr.RepoNameWithOwner)
 			if err != nil {

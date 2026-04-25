@@ -394,16 +394,19 @@ func TestNewGHClientWithToken(t *testing.T) {
 	}
 }
 
-// --- FetchPRs with nil client guard (no network) ---
-
 func TestFetchPRs_EmptyQuery_DefaultsToAuthorMe(t *testing.T) {
-	// This test verifies the default query logic without making network calls
-	client := NewGHClientWithToken("fake-token")
+	got := prSearchQuery("")
+	want := "author:@me is:open"
+	if got != want {
+		t.Fatalf("prSearchQuery(\"\"): got %q, want %q", got, want)
+	}
+}
 
-	// We can't easily test the full FetchPRs without a mock server,
-	// but we can verify the client was constructed properly
-	if client.client == nil {
-		t.Fatal("go-github client should be initialized")
+func TestFetchPRs_CustomQuery(t *testing.T) {
+	query := "author:bob is:open"
+	got := prSearchQuery(query)
+	if got != query {
+		t.Fatalf("prSearchQuery(%q): got %q", query, got)
 	}
 }
 

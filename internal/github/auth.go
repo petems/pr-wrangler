@@ -38,6 +38,11 @@ func authFilePath() (string, error) {
 	return filepath.Join(dir, "pr-wrangler", "auth.json"), nil
 }
 
+// AuthFilePath returns the platform-specific path used for stored credentials.
+func AuthFilePath() (string, error) {
+	return authFilePath()
+}
+
 // LoadToken loads a stored token from disk.
 // Returns nil (no error) if no token file exists.
 func LoadToken() (*TokenInfo, error) {

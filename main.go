@@ -171,7 +171,11 @@ func runAuthLogin() {
 
 	fmt.Printf("Authenticated as %s\n", user)
 	fmt.Printf("Scopes: %s\n", tokenResp.Scope)
-	fmt.Println("Token saved to ~/.config/pr-wrangler/auth.json")
+	if authPath, err := github.AuthFilePath(); err == nil {
+		fmt.Printf("Token saved to %s\n", authPath)
+	} else {
+		fmt.Println("Token saved.")
+	}
 }
 
 func runAuthStatus() {
