@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	gh "github.com/google/go-github/v72/github"
 )
 
 func mustJSON(t *testing.T, v interface{}) []byte {
@@ -290,6 +292,53 @@ func TestDeriveCheckState(t *testing.T) {
 			got := deriveCheckState(tt.checks)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusCheckFromClassicStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		state          string
+		wantStatus     string
+		wantConclusion CIConclusion
+	}{
+		{
+			name:       "pending remains in progress",
+			state:      "pending",
+			wantStatus: "in_progress",
+		},
+		{
+			name:           "success is completed",
+			state:          "success",
+			wantStatus:     "completed",
+			wantConclusion: CIConclusionSuccess,
+		},
+		{
+			name:           "failure is completed",
+			state:          "failure",
+			wantStatus:     "completed",
+			wantConclusion: CIConclusionFailure,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := &gh.RepoStatus{
+				Context: gh.Ptr("ci/test"),
+				State:   gh.Ptr(tt.state),
+			}
+
+			got := statusCheckFromClassicStatus(status)
+			if got.Name != "ci/test" {
+				t.Errorf("Name: got %q, want ci/test", got.Name)
+			}
+			if got.Status != tt.wantStatus {
+				t.Errorf("Status: got %q, want %q", got.Status, tt.wantStatus)
+			}
+			if got.Conclusion != tt.wantConclusion {
+				t.Errorf("Conclusion: got %q, want %q", got.Conclusion, tt.wantConclusion)
 			}
 		})
 	}

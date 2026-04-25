@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,13 +41,13 @@ type AccessTokenResponse struct {
 var authHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // RequestDeviceCode initiates the device flow by requesting a device code from GitHub.
-func RequestDeviceCode(cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
+func RequestDeviceCode(ctx context.Context, cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
 	data := url.Values{
 		"client_id": {cfg.ClientID},
 		"scope":     {strings.Join(cfg.Scopes, " ")},
 	}
 
-	req, err := http.NewRequest("POST", "https://github.com/login/device/code", strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://github.com/login/device/code", strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -57,7 +58,7 @@ func RequestDeviceCode(cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("requesting device code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -78,7 +79,7 @@ func RequestDeviceCode(cfg DeviceFlowConfig) (*DeviceCodeResponse, error) {
 
 // PollForToken polls GitHub until the user authorizes the device, the code expires, or an error occurs.
 // The onPoll callback is called before each poll attempt (for displaying progress).
-func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll func(attempt int)) (*AccessTokenResponse, error) {
+func PollForToken(ctx context.Context, cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll func(attempt int)) (*AccessTokenResponse, error) {
 	interval := time.Duration(deviceCode.Interval) * time.Second
 	if interval < 5*time.Second {
 		interval = 5 * time.Second
@@ -93,7 +94,11 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 			onPoll(attempt)
 		}
 
-		time.Sleep(interval)
+		select {
+		case <-time.After(interval):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 
 		data := url.Values{
 			"client_id":   {cfg.ClientID},
@@ -101,7 +106,7 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 		}
 
-		req, err := http.NewRequest("POST", "https://github.com/login/oauth/access_token", strings.NewReader(data.Encode()))
+		req, err := http.NewRequestWithContext(ctx, "POST", "https://github.com/login/oauth/access_token", strings.NewReader(data.Encode()))
 		if err != nil {
 			return nil, fmt.Errorf("creating poll request: %w", err)
 		}
@@ -114,7 +119,7 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		closeResponseBody(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("reading poll response: %w", err)
 		}
@@ -156,8 +161,8 @@ func PollForToken(cfg DeviceFlowConfig, deviceCode *DeviceCodeResponse, onPoll f
 }
 
 // FetchAuthenticatedUser fetches the username for the given token.
-func FetchAuthenticatedUser(token string) (string, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+func FetchAuthenticatedUser(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
 	if err != nil {
 		return "", err
 	}
@@ -169,7 +174,7 @@ func FetchAuthenticatedUser(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetching user: %w", err)
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to fetch user (%d)", resp.StatusCode)
@@ -183,4 +188,10 @@ func FetchAuthenticatedUser(token string) (string, error) {
 	}
 
 	return user.Login, nil
+}
+
+func closeResponseBody(body io.Closer) {
+	if err := body.Close(); err != nil {
+		_ = err
+	}
 }

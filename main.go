@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,9 +125,10 @@ func runAuthLogin() {
 		ClientID: clientID,
 		Scopes:   github.RequiredScopes,
 	}
+	ctx := context.Background()
 
 	fmt.Println("Requesting device code from GitHub...")
-	deviceCode, err := github.RequestDeviceCode(cfg)
+	deviceCode, err := github.RequestDeviceCode(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -138,7 +140,7 @@ func runAuthLogin() {
 	fmt.Println()
 	fmt.Println("Waiting for authorization...")
 
-	tokenResp, err := github.PollForToken(cfg, deviceCode, func(attempt int) {
+	tokenResp, err := github.PollForToken(ctx, cfg, deviceCode, func(attempt int) {
 		fmt.Printf("  Polling... (attempt %d)\r", attempt)
 	})
 	if err != nil {
@@ -148,7 +150,7 @@ func runAuthLogin() {
 	fmt.Println()
 
 	// Fetch the authenticated user
-	user, err := github.FetchAuthenticatedUser(tokenResp.AccessToken)
+	user, err := github.FetchAuthenticatedUser(ctx, tokenResp.AccessToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not fetch username: %v\n", err)
 		user = "(unknown)"
@@ -203,7 +205,7 @@ func runAuthStatus() {
 	}
 
 	// Verify the token works
-	user, err := github.FetchAuthenticatedUser(token)
+	user, err := github.FetchAuthenticatedUser(context.Background(), token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: token may be invalid: %v\n", err)
 	} else {

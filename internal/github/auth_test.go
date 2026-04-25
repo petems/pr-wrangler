@@ -1,17 +1,15 @@
 package github
 
 import (
-	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
 func TestSaveAndLoadToken(t *testing.T) {
-	// Use a temp dir for the auth file
 	tmpDir := t.TempDir()
-	authFile := filepath.Join(tmpDir, "auth.json")
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
 	info := &TokenInfo{
 		Token:     "test-token-123",
@@ -20,24 +18,28 @@ func TestSaveAndLoadToken(t *testing.T) {
 		CreatedAt: time.Now().Truncate(time.Second),
 	}
 
-	// Write directly to the temp path
-	data, err := json.MarshalIndent(info, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := os.WriteFile(authFile, data, 0600); err != nil {
-		t.Fatalf("write: %v", err)
+	if err := SaveToken(info); err != nil {
+		t.Fatalf("SaveToken: %v", err)
 	}
 
-	// Read back
-	readData, err := os.ReadFile(authFile)
+	authFile, err := authFilePath()
 	if err != nil {
-		t.Fatalf("read: %v", err)
+		t.Fatalf("authFilePath: %v", err)
+	}
+	stat, err := os.Stat(authFile)
+	if err != nil {
+		t.Fatalf("stat auth file: %v", err)
+	}
+	if got := stat.Mode().Perm(); got != 0600 {
+		t.Fatalf("auth file mode: got %v, want 0600", got)
 	}
 
-	var loaded TokenInfo
-	if err := json.Unmarshal(readData, &loaded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	loaded, err := LoadToken()
+	if err != nil {
+		t.Fatalf("LoadToken: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadToken returned nil")
 	}
 
 	if loaded.Token != info.Token {

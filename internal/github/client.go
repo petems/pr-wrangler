@@ -93,35 +93,42 @@ func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult,
 		},
 	}
 
-	issueResult, _, err := c.client.Search.Issues(ctx, fullQuery, opts)
-	if err != nil {
-		return nil, fmt.Errorf("searching PRs: %w", err)
-	}
-
-	results := make([]searchResult, 0, len(issueResult.Issues))
-	for _, issue := range issueResult.Issues {
-		sr := searchResult{
-			URL:    issue.GetHTMLURL(),
-			Number: issue.GetNumber(),
-			State:  issue.GetState(),
+	var results []searchResult
+	for {
+		issueResult, resp, err := c.client.Search.Issues(ctx, fullQuery, opts)
+		if err != nil {
+			return nil, fmt.Errorf("searching PRs: %w", err)
 		}
 
-		// Extract owner/repo from the repository URL
-		if issue.RepositoryURL != nil {
-			sr.RepoNameWithOwner = repoNameFromAPIURL(issue.GetRepositoryURL())
+		for _, issue := range issueResult.Issues {
+			sr := searchResult{
+				URL:    issue.GetHTMLURL(),
+				Number: issue.GetNumber(),
+				State:  issue.GetState(),
+			}
+
+			// Extract owner/repo from the repository URL
+			if issue.RepositoryURL != nil {
+				sr.RepoNameWithOwner = repoNameFromAPIURL(issue.GetRepositoryURL())
+			}
+
+			// Pull request details for draft status
+			if issue.PullRequestLinks != nil {
+				// Search API doesn't directly expose draft; we'll get it in the detail fetch
+				sr.IsDraft = false
+			}
+
+			for _, l := range issue.Labels {
+				sr.Labels = append(sr.Labels, l.GetName())
+			}
+
+			results = append(results, sr)
 		}
 
-		// Pull request details for draft status
-		if issue.PullRequestLinks != nil {
-			// Search API doesn't directly expose draft; we'll get it in the detail fetch
-			sr.IsDraft = false
+		if resp == nil || resp.NextPage == 0 {
+			break
 		}
-
-		for _, l := range issue.Labels {
-			sr.Labels = append(sr.Labels, l.GetName())
-		}
-
-		results = append(results, sr)
+		opts.Page = resp.NextPage
 	}
 
 	return results, nil
@@ -135,16 +142,16 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 	}
 
 	result := PR{
-		Number:         pr.GetNumber(),
-		Title:          pr.GetTitle(),
-		URL:            pr.GetHTMLURL(),
-		Author:         pr.GetUser().GetLogin(),
-		HeadRefName:    pr.GetHead().GetRef(),
-		HeadCommitOID:  pr.GetHead().GetSHA(),
-		State:          PRState(strings.ToUpper(pr.GetState())),
-		MergedAt:       pr.MergedAt.GetTime(),
-		IsDraft:        pr.GetDraft(),
-		Mergeable:      strings.ToUpper(pr.GetMergeableState()),
+		Number:            pr.GetNumber(),
+		Title:             pr.GetTitle(),
+		URL:               pr.GetHTMLURL(),
+		Author:            pr.GetUser().GetLogin(),
+		HeadRefName:       pr.GetHead().GetRef(),
+		HeadCommitOID:     pr.GetHead().GetSHA(),
+		State:             PRState(strings.ToUpper(pr.GetState())),
+		MergedAt:          pr.MergedAt.GetTime(),
+		IsDraft:           pr.GetDraft(),
+		Mergeable:         strings.ToUpper(pr.GetMergeableState()),
 		RepoNameWithOwner: owner + "/" + repo,
 	}
 
@@ -189,11 +196,7 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		combinedStatus, _, err := c.client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, &gh.ListOptions{PerPage: 100})
 		if err == nil && combinedStatus != nil {
 			for _, status := range combinedStatus.Statuses {
-				result.StatusChecks = append(result.StatusChecks, StatusCheck{
-					Name:       status.GetContext(),
-					Status:     "completed",
-					Conclusion: CIConclusion(strings.ToUpper(status.GetState())),
-				})
+				result.StatusChecks = append(result.StatusChecks, statusCheckFromClassicStatus(status))
 			}
 		}
 
@@ -204,6 +207,18 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 	result.Mergeable = mapMergeableState(pr)
 
 	return result, nil
+}
+
+func statusCheckFromClassicStatus(status *gh.RepoStatus) StatusCheck {
+	state := strings.ToUpper(status.GetState())
+	check := StatusCheck{Name: status.GetContext()}
+	if state == "PENDING" {
+		check.Status = "in_progress"
+		return check
+	}
+	check.Status = "completed"
+	check.Conclusion = CIConclusion(state)
+	return check
 }
 
 // deriveReviewDecision determines the overall review decision from individual reviews.
