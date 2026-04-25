@@ -389,9 +389,6 @@ func TestNewGHClientWithToken(t *testing.T) {
 	if client.Client() == nil {
 		t.Error("Client() should not be nil")
 	}
-	if client.Runner == nil {
-		t.Error("Runner should not be nil")
-	}
 }
 
 func TestFetchPRs_EmptyQuery_DefaultsToAuthorMe(t *testing.T) {

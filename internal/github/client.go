@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -13,29 +12,8 @@ import (
 
 const maxConcurrentPRDetails = 8
 
-// CommandRunner abstracts shell command execution for testability.
-// Retained for tmux and git operations; GitHub API calls now use go-github.
-type CommandRunner interface {
-	Run(ctx context.Context, name string, args ...string) ([]byte, error)
-}
-
-// ExecRunner is the production implementation of CommandRunner
-type ExecRunner struct{}
-
-func (e *ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-	}
-	return out, err
-}
-
 // GHClient interacts with the GitHub API using go-github.
 type GHClient struct {
-	Runner CommandRunner
 	client *gh.Client
 	token  string
 }
@@ -57,7 +35,6 @@ func NewGHClient() (*GHClient, error) {
 // NewGHClientWithToken creates a GHClient with an explicit token.
 func NewGHClientWithToken(token string) *GHClient {
 	return &GHClient{
-		Runner: &ExecRunner{},
 		client: gh.NewClient(nil).WithAuthToken(token),
 		token:  token,
 	}

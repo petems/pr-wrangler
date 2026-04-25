@@ -278,7 +278,7 @@ func runTUI() {
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	sessionMgr := tmux.NewSessionManager(ghClient.Runner, homeDir, cfg.RepoBaseDir)
+	sessionMgr := tmux.NewSessionManager(&tmux.ExecRunner{}, homeDir, cfg.RepoBaseDir)
 
 	historyPath, _ := sessionHistoryPath()
 	sessionStore := session.NewStore(historyPath)
