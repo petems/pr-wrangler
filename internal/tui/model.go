@@ -51,15 +51,8 @@ type Model struct {
 
 	spinner spinner.Model
 
-	// Filtering
-	repoFilter   string
-	statusFilter string
-	searchFilter string
-
 	// Overlays
-	showHelp     bool
-	showPRDetail bool
-	prDetailIdx  int
+	showHelp bool
 
 	notification string
 
@@ -188,7 +181,8 @@ func (m Model) View() string {
 	b.WriteString(m.buildHelpLine())
 
 	if m.showHelp {
-		// TODO: render help overlay
+		b.WriteString("\n\n")
+		b.WriteString(m.renderHelp())
 	}
 
 	return b.String()
@@ -411,6 +405,22 @@ func (m Model) switchToSession() tea.Cmd {
 
 func (m Model) buildHelpLine() string {
 	return helpStyle.Render("q: quit | r: refresh | enter/c: claude session | o: open | ?: help")
+}
+
+func (m Model) renderHelp() string {
+	var b strings.Builder
+	b.WriteString(helpCategoryStyle.Render("Keyboard"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("q / ctrl+c  quit"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("r           refresh PRs"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("enter / c   open or switch to Claude session"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("o           open selected PR in browser"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("?           toggle help"))
+	return b.String()
 }
 
 func truncate(s string, max int) string {
