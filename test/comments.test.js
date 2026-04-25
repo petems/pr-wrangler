@@ -180,8 +180,15 @@ describe("isBot", () => {
     expect(isBot("Copilot")).toBe(true);
   });
 
-  it("detects usernames containing bot", () => {
+  it("detects explicit bot suffixes", () => {
     expect(isBot("my-custom-bot")).toBe(true);
+    expect(isBot("my_custom_bot")).toBe(true);
+  });
+
+  it("does not detect bot as a substring inside human usernames", () => {
+    expect(isBot("robotnik")).toBe(false);
+    expect(isBot("abbott")).toBe(false);
+    expect(isBot("sabotage")).toBe(false);
   });
 
   it("detects github-actions", () => {
