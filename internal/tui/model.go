@@ -51,6 +51,7 @@ type Model struct {
 
 	spinner spinner.Model
 
+	// Overlays
 	showHelp bool
 
 	notification string
@@ -178,6 +179,11 @@ func (m Model) View() string {
 	}
 
 	b.WriteString(m.buildHelpLine())
+
+	if m.showHelp {
+		b.WriteString("\n\n")
+		b.WriteString(m.renderHelp())
+	}
 
 	return b.String()
 }
@@ -397,8 +403,43 @@ func (m Model) switchToSession() tea.Cmd {
 	return ensureWorktreeCmd(m.sessionMgr, sess, repoDir, windowName, claudeCmd)
 }
 
+type helpEntry struct {
+	shortKey  string
+	longKey   string
+	shortDesc string
+	longDesc  string
+}
+
+var helpEntries = []helpEntry{
+	{"q", "q / ctrl+c", "quit", "quit"},
+	{"r", "r", "refresh", "refresh PRs"},
+	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
+	{"o", "o", "open", "open selected PR in browser"},
+	{"?", "?", "help", "toggle help"},
+}
+
 func (m Model) buildHelpLine() string {
-	return helpStyle.Render("q: quit | r: refresh | enter/c: claude session | o: open | ?: help")
+	parts := make([]string, len(helpEntries))
+	for i, e := range helpEntries {
+		parts[i] = fmt.Sprintf("%s: %s", e.shortKey, e.shortDesc)
+	}
+	return helpStyle.Render(strings.Join(parts, " | "))
+}
+
+func (m Model) renderHelp() string {
+	keyWidth := 0
+	for _, e := range helpEntries {
+		if w := lipgloss.Width(e.longKey); w > keyWidth {
+			keyWidth = w
+		}
+	}
+	lines := make([]string, 0, len(helpEntries)+1)
+	lines = append(lines, helpCategoryStyle.Render("Keyboard"))
+	for _, e := range helpEntries {
+		padding := strings.Repeat(" ", keyWidth-lipgloss.Width(e.longKey)+2)
+		lines = append(lines, helpStyle.Render(e.longKey+padding+e.longDesc))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func truncate(s string, max int) string {
@@ -437,14 +478,26 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 	case github.ActionResolveConflicts:
 		cmdTemplate = m.config.AgentCommands["resolve-conflicts"]
 		windowName = "conflicts"
+	case github.ActionReviewComments:
+		cmdTemplate = m.config.AgentCommands["review-comments"]
+		windowName = "reviews"
 	}
 
 	if cmdTemplate == "" {
 		cmdTemplate = "claude --permission-mode acceptEdits 'Continue working on this PR: {{pr_url}} - Review the current state, check for any issues, and make progress on remaining work.'"
 	}
 
+	// Prefix with GITHUB_TOKEN so the JS CLI (and any subprocess) uses our managed token
+	tokenPrefix := ""
+	if m.ghClient.Token() != "" {
+		escapedToken := strings.ReplaceAll(m.ghClient.Token(), "'", "'\"'\"'")
+		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", escapedToken)
+	}
+
 	cmd := strings.ReplaceAll(cmdTemplate, "{{pr_url}}", r.PR.URL)
-	return windowName, cmd
+	cmd = strings.ReplaceAll(cmd, "{{pr_number}}", fmt.Sprintf("%d", r.PR.Number))
+	cmd = strings.ReplaceAll(cmd, "{{repo_nwo}}", r.PR.RepoNameWithOwner)
+	return windowName, tokenPrefix + cmd
 }
 
 func openBrowser(url string) {

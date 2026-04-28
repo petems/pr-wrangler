@@ -235,7 +235,8 @@ func TestRenderCowsay_SmallTerminalNoPanic(t *testing.T) {
 
 func newTestModel() Model {
 	return Model{
-		config: config.DefaultConfig(),
+		ghClient: github.NewGHClientWithToken("test-token"),
+		config:   config.DefaultConfig(),
 	}
 }
 

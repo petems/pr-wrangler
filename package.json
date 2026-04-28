@@ -34,7 +34,7 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "devDependencies": {
     "vitest": "^4.0.18"

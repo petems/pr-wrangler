@@ -17,7 +17,8 @@ const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "skills");
 const DEST = path.join(ROOT, ".claude", "skills");
 const LOCAL_CLI = path.join(ROOT, "bin", "pr-wrangler-reviews.js");
-const LOCAL_CLI_QUOTED = `"${LOCAL_CLI.replace(/(["\\$`])/g, "\\$1")}"`;
+const shellQuote = (value) => `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
+const LOCAL_CLI_CMD = `node ${shellQuote(LOCAL_CLI)}`;
 
 const SKILL_DIRS = ["pr-wrangler-review-comments", "pr-wrangler-review-bot-comments", "pr-wrangler-review-human-comments"];
 
@@ -30,15 +31,15 @@ for (const name of SKILL_DIRS) {
   let content = fs.readFileSync(path.join(SRC, name, "SKILL.md"), "utf8");
 
   // Patch all package runner references to use local CLI binary
-  content = content.replaceAll("npx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
-  content = content.replaceAll("pnpm dlx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
-  content = content.replaceAll("yarn dlx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
-  content = content.replaceAll("bunx pr-wrangler-reviews", `node ${LOCAL_CLI_QUOTED}`);
+  content = content.replaceAll("npx pr-wrangler-reviews", LOCAL_CLI_CMD);
+  content = content.replaceAll("pnpm dlx pr-wrangler-reviews", LOCAL_CLI_CMD);
+  content = content.replaceAll("yarn dlx pr-wrangler-reviews", LOCAL_CLI_CMD);
+  content = content.replaceAll("bunx pr-wrangler-reviews", LOCAL_CLI_CMD);
 
   // Deduplicate allowed-tools after patching (all runners become the same)
   content = content.replace(
     /^(allowed-tools:).*$/m,
-    `$1 Bash(node ${LOCAL_CLI} *) Bash(git config *) Bash(git add *) Bash(git commit *) Bash(git push *)`
+    `$1 Bash(${LOCAL_CLI_CMD} *) Bash(git config *) Bash(git add *) Bash(git commit *) Bash(git push *)`
   );
 
   // Remove the package manager substitution note (irrelevant in local dev)

@@ -10,6 +10,8 @@ func DetermineAction(status PRStatus) Action {
 		return ActionMerge
 	case PRStatusHasConflicts:
 		return ActionResolveConflicts
+	case PRStatusReviewedWithComments:
+		return ActionReviewComments
 	default:
 		return ActionNone
 	}

@@ -2,11 +2,28 @@ package tmux
 
 import (
 	"context"
+	"fmt"
+	"os/exec"
+	"strings"
 )
 
 // CommandRunner abstracts shell command execution for testability
 type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+}
+
+// ExecRunner runs shell commands using the local process environment.
+type ExecRunner struct{}
+
+func (e *ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+			return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
+	}
+	return out, err
 }
 
 // PRSession represents a persistent tmux session for a PR or local work
