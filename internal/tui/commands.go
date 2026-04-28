@@ -38,7 +38,7 @@ type worktreeReadyMsg struct {
 }
 
 // sessionReadyMsg is sent after the tmux session/window has been created,
-// signalling that we should now switch to it.
+// signaling that we should now switch to it.
 type sessionReadyMsg struct {
 	sessionName string
 	windowName  string

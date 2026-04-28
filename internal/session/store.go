@@ -17,7 +17,8 @@ func NewStore(path string) *Store {
 }
 
 func (s *Store) Load() ([]SessionRecord, error) {
-	data, err := os.ReadFile(s.Path)
+	data, err := os.ReadFile(s.Path) // #nosec G304 -- path is user's own session history file
+
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -40,7 +41,7 @@ func (s *Store) Load() ([]SessionRecord, error) {
 
 func (s *Store) Save(records []SessionRecord) error {
 	dir := filepath.Dir(s.Path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating session history dir: %w", err)
 	}
 
@@ -49,7 +50,8 @@ func (s *Store) Save(records []SessionRecord) error {
 		return fmt.Errorf("marshaling session history: %w", err)
 	}
 
-	if err := os.WriteFile(s.Path, data, 0644); err != nil {
+	if err := os.WriteFile(s.Path, data, 0o600); err != nil {
+
 		return fmt.Errorf("writing session history: %w", err)
 	}
 	return nil

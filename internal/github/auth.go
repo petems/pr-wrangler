@@ -51,7 +51,7 @@ func LoadToken() (*TokenInfo, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the user's own auth file
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

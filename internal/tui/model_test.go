@@ -15,7 +15,7 @@ func TestBuildRows_HidesMergedPRs(t *testing.T) {
 		{Number: 3, Title: "Another open", State: github.PRStateOpen},
 	}
 
-	rows := buildRows(prs, "")
+	rows := buildRows(prs)
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows (merged hidden), got %d", len(rows))
 	}
@@ -33,7 +33,7 @@ func TestBuildRows_HidesClosedPRs(t *testing.T) {
 		{Number: 2, Title: "Closed PR", State: github.PRStateClosed},
 	}
 
-	rows := buildRows(prs, "")
+	rows := buildRows(prs)
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row (closed hidden), got %d", len(rows))
 	}
@@ -48,14 +48,14 @@ func TestBuildRows_AllMerged(t *testing.T) {
 		{Number: 2, State: github.PRStateMerged},
 	}
 
-	rows := buildRows(prs, "")
+	rows := buildRows(prs)
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows, got %d", len(rows))
 	}
 }
 
 func TestBuildRows_Empty(t *testing.T) {
-	rows := buildRows(nil, "")
+	rows := buildRows(nil)
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows, got %d", len(rows))
 	}

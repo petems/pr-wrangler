@@ -64,7 +64,7 @@ func Load() (Config, error) {
 // Save writes config to the given file path, creating directories as needed
 func Save(cfg Config, path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 
@@ -73,7 +73,7 @@ func Save(cfg Config, path string) error {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 	return nil
@@ -82,7 +82,8 @@ func Save(cfg Config, path string) error {
 // LoadFromPath reads config from the given file path.
 // Returns DefaultConfig if the file does not exist.
 func LoadFromPath(path string) (Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is user's own config file
+
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return DefaultConfig(), nil

@@ -119,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastError = msg.err
 		} else {
-			m.allRows = buildRows(msg.prs, m.config.ServiceLabelPrefix)
+			m.allRows = buildRows(msg.prs)
 			m.applyFilters()
 			m.table = m.rebuildTable()
 		}
@@ -233,7 +233,7 @@ func renderCowsay(spinnerStr string, width, height int) string {
 	// Blank line between title and cow
 	totalLines := len(titleLines) + 1 + len(cowLines)
 
-	// Centre vertically
+	// Center vertically
 	padTop := (height - totalLines) / 2
 	if padTop < 0 {
 		padTop = 0
@@ -341,7 +341,7 @@ func (m Model) rebuildTable() table.Model {
 	return t
 }
 
-func buildRows(prs []github.PR, servicePrefix string) []PRRow {
+func buildRows(prs []github.PR) []PRRow {
 	var rows []PRRow
 	for _, pr := range prs {
 		if pr.State == github.PRStateMerged || pr.State == github.PRStateClosed {

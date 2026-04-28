@@ -96,6 +96,6 @@ tidy:
 clean:
 	rm -f $(BINARY) coverage.out coverage.html
 
-## check: Run fmt-check, vet, test-race (CI entrypoint)
+## check: Run fmt-check, lint, vet, test-race (CI entrypoint)
 .PHONY: check
-check: fmt-check vet test-race
+check: fmt-check lint vet test-race
