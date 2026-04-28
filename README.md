@@ -1,5 +1,8 @@
 # PR Wrangler
 
+[![CI](https://github.com/petems/pr-wrangler/actions/workflows/ci.yml/badge.svg)](https://github.com/petems/pr-wrangler/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/petems/pr-wrangler)](https://goreportcard.com/report/github.com/petems/pr-wrangler)
+
 <img width="506" height="356" alt="Loading Screen" src="https://github.com/user-attachments/assets/851017e4-3714-43af-8b67-27af88b5a706" />
 
 PR Wrangler is a terminal UI for triaging and acting on GitHub pull requests. It uses the `gh` CLI to discover PRs, classifies each PR into actionable states like `Fix CI`, `Address feedback`, or `Resolve conflicts`, and launches task-focused tmux sessions for follow-up work.
@@ -21,6 +24,18 @@ make check
 ```
 
 `make run` builds `./pr-wrangler` and starts the Bubble Tea interface.
+
+### CI Validation
+
+Before submitting a pull request, run `make check` to ensure your changes pass all CI checks:
+
+- **Format Check**: `make fmt-check` - Validates code formatting
+- **Lint**: `make lint` - Runs golangci-lint with configured rules
+- **Vet**: `make vet` - Runs go vet for static analysis
+- **Test**: `make test-race` - Runs tests with race detector
+- **Coverage**: Minimum 80% code coverage required
+
+The CI pipeline will automatically run these checks on all pull requests.
 
 ## Configuration
 
