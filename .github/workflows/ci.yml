@@ -117,9 +117,7 @@ jobs:
         run: make build
 
       - name: Verify binary
-        run: |
-          ./pr-wrangler --version || echo "Binary built successfully"
-          test -f ./pr-wrangler
+        run: test -x ./pr-wrangler
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
