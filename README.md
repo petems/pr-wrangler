@@ -33,7 +33,7 @@ Before submitting a pull request, run `make check` to ensure your changes pass a
 - **Lint**: `make lint` - Runs golangci-lint with configured rules
 - **Vet**: `make vet` - Runs go vet for static analysis
 - **Test**: `make test-race` - Runs tests with race detector
-- **Coverage**: Minimum 80% code coverage required
+- **Coverage**: Target is 80% code coverage (currently tracked as a warning)
 
 The CI pipeline will automatically run these checks on all pull requests.
 
