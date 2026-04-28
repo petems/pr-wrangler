@@ -408,19 +408,14 @@ func (m Model) buildHelpLine() string {
 }
 
 func (m Model) renderHelp() string {
-	var b strings.Builder
-	b.WriteString(helpCategoryStyle.Render("Keyboard"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("q / ctrl+c  quit"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("r           refresh PRs"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter / c   open or switch to Claude session"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("o           open selected PR in browser"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("?           toggle help"))
-	return b.String()
+	return lipgloss.JoinVertical(lipgloss.Left,
+		helpCategoryStyle.Render("Keyboard"),
+		helpStyle.Render("q / ctrl+c  quit"),
+		helpStyle.Render("r           refresh PRs"),
+		helpStyle.Render("enter / c   open or switch to Claude session"),
+		helpStyle.Render("o           open selected PR in browser"),
+		helpStyle.Render("?           toggle help"),
+	)
 }
 
 func truncate(s string, max int) string {
