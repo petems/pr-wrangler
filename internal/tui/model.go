@@ -403,19 +403,43 @@ func (m Model) switchToSession() tea.Cmd {
 	return ensureWorktreeCmd(m.sessionMgr, sess, repoDir, windowName, claudeCmd)
 }
 
+type helpEntry struct {
+	shortKey  string
+	longKey   string
+	shortDesc string
+	longDesc  string
+}
+
+var helpEntries = []helpEntry{
+	{"q", "q / ctrl+c", "quit", "quit"},
+	{"r", "r", "refresh", "refresh PRs"},
+	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
+	{"o", "o", "open", "open selected PR in browser"},
+	{"?", "?", "help", "toggle help"},
+}
+
 func (m Model) buildHelpLine() string {
-	return helpStyle.Render("q: quit | r: refresh | enter/c: claude session | o: open | ?: help")
+	parts := make([]string, len(helpEntries))
+	for i, e := range helpEntries {
+		parts[i] = fmt.Sprintf("%s: %s", e.shortKey, e.shortDesc)
+	}
+	return helpStyle.Render(strings.Join(parts, " | "))
 }
 
 func (m Model) renderHelp() string {
-	return lipgloss.JoinVertical(lipgloss.Left,
-		helpCategoryStyle.Render("Keyboard"),
-		helpStyle.Render("q / ctrl+c  quit"),
-		helpStyle.Render("r           refresh PRs"),
-		helpStyle.Render("enter / c   open or switch to Claude session"),
-		helpStyle.Render("o           open selected PR in browser"),
-		helpStyle.Render("?           toggle help"),
-	)
+	keyWidth := 0
+	for _, e := range helpEntries {
+		if w := lipgloss.Width(e.longKey); w > keyWidth {
+			keyWidth = w
+		}
+	}
+	lines := make([]string, 0, len(helpEntries)+1)
+	lines = append(lines, helpCategoryStyle.Render("Keyboard"))
+	for _, e := range helpEntries {
+		padding := strings.Repeat(" ", keyWidth-lipgloss.Width(e.longKey)+2)
+		lines = append(lines, helpStyle.Render(e.longKey+padding+e.longDesc))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
 func truncate(s string, max int) string {
