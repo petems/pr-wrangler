@@ -478,14 +478,26 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 	case github.ActionResolveConflicts:
 		cmdTemplate = m.config.AgentCommands["resolve-conflicts"]
 		windowName = "conflicts"
+	case github.ActionReviewComments:
+		cmdTemplate = m.config.AgentCommands["review-comments"]
+		windowName = "reviews"
 	}
 
 	if cmdTemplate == "" {
 		cmdTemplate = "claude --permission-mode acceptEdits 'Continue working on this PR: {{pr_url}} - Review the current state, check for any issues, and make progress on remaining work.'"
 	}
 
+	// Prefix with GITHUB_TOKEN so the JS CLI (and any subprocess) uses our managed token
+	tokenPrefix := ""
+	if m.ghClient.Token() != "" {
+		escapedToken := strings.ReplaceAll(m.ghClient.Token(), "'", "'\"'\"'")
+		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", escapedToken)
+	}
+
 	cmd := strings.ReplaceAll(cmdTemplate, "{{pr_url}}", r.PR.URL)
-	return windowName, cmd
+	cmd = strings.ReplaceAll(cmd, "{{pr_number}}", fmt.Sprintf("%d", r.PR.Number))
+	cmd = strings.ReplaceAll(cmd, "{{repo_nwo}}", r.PR.RepoNameWithOwner)
+	return windowName, tokenPrefix + cmd
 }
 
 func openBrowser(url string) {

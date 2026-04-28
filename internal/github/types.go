@@ -109,6 +109,7 @@ const (
 	ActionMerge            Action = "Merge"
 	ActionInvestigate      Action = "Investigate"
 	ActionResolveConflicts Action = "Resolve conflicts"
+	ActionReviewComments   Action = "Review comments"
 	ActionNone             Action = ""
 )
 
