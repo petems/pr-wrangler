@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // mockRunner implements CommandRunner for testing.
 // It returns different output based on the command being run.
 type mockRunner struct {
+	mu sync.Mutex
 	// calls records each invocation for assertion
 	calls [][]string
 	// handlers maps a command prefix to its response
@@ -28,9 +30,12 @@ func newMockRunner() *mockRunner {
 	return &mockRunner{handlers: make(map[string]mockResponse)}
 }
 
-func (m *mockRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (m *mockRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	call := append([]string{name}, args...)
+
+	m.mu.Lock()
 	m.calls = append(m.calls, call)
+	defer m.mu.Unlock()
 
 	key := strings.Join(call, " ")
 	for prefix, resp := range m.handlers {

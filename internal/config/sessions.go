@@ -42,7 +42,8 @@ func SessionsPath() (string, error) {
 // LoadSessions reads and parses the session state file. Returns empty state
 // (not error) if the file is missing or unparseable.
 func LoadSessions(path string) SessionState {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is user's own sessions file
+
 	if err != nil {
 		return SessionState{}
 	}
@@ -57,7 +58,7 @@ func LoadSessions(path string) SessionState {
 // SaveSessions writes the session state to disk, creating the directory if needed.
 func SaveSessions(state SessionState, path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating sessions dir: %w", err)
 	}
 
@@ -66,7 +67,7 @@ func SaveSessions(state SessionState, path string) error {
 		return fmt.Errorf("marshaling sessions: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing sessions: %w", err)
 	}
 	return nil
