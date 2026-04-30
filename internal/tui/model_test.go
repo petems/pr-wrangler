@@ -15,7 +15,7 @@ func TestBuildRows_HidesMergedPRs(t *testing.T) {
 		{Number: 3, Title: "Another open", State: github.PRStateOpen},
 	}
 
-	rows := buildRows(prs)
+	rows := buildRows(prs, nil)
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows (merged hidden), got %d", len(rows))
 	}
@@ -33,7 +33,7 @@ func TestBuildRows_HidesClosedPRs(t *testing.T) {
 		{Number: 2, Title: "Closed PR", State: github.PRStateClosed},
 	}
 
-	rows := buildRows(prs)
+	rows := buildRows(prs, nil)
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row (closed hidden), got %d", len(rows))
 	}
@@ -48,16 +48,60 @@ func TestBuildRows_AllMerged(t *testing.T) {
 		{Number: 2, State: github.PRStateMerged},
 	}
 
-	rows := buildRows(prs)
+	rows := buildRows(prs, nil)
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows, got %d", len(rows))
 	}
 }
 
 func TestBuildRows_Empty(t *testing.T) {
-	rows := buildRows(nil)
+	rows := buildRows(nil, nil)
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows, got %d", len(rows))
+	}
+}
+
+func TestBuildRows_WithSAMLErrors(t *testing.T) {
+	prs := []github.PR{
+		{Number: 1, Title: "Open PR", State: github.PRStateOpen, RepoNameWithOwner: "org/repo1"},
+	}
+
+	samlErrors := map[string]*github.SAMLAuthError{
+		"org/repo2#30": {
+			Message: "Resource protected by organization SAML",
+			AuthURL: "https://github.com/enterprises/example-org/sso?authorization_request=ABC123",
+		},
+	}
+
+	rows := buildRows(prs, samlErrors)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (1 normal + 1 SAML), got %d", len(rows))
+	}
+
+	// Find the SAML row
+	var samlRow *PRRow
+	for i := range rows {
+		if rows[i].Status == github.PRStatusSAMLRequired {
+			samlRow = &rows[i]
+			break
+		}
+	}
+
+	if samlRow == nil {
+		t.Fatal("expected a SAML row, but found none")
+	}
+
+	if samlRow.PR.Number != 30 {
+		t.Errorf("SAML row: got PR #%d, want #30", samlRow.PR.Number)
+	}
+	if samlRow.Action != github.ActionAuthorizeSAML {
+		t.Errorf("SAML row action: got %q, want %q", samlRow.Action, github.ActionAuthorizeSAML)
+	}
+	if samlRow.SAMLError == nil {
+		t.Error("SAML row should have SAMLError set")
+	}
+	if samlRow.SAMLError != nil && samlRow.SAMLError.AuthURL != "https://github.com/enterprises/example-org/sso?authorization_request=ABC123" {
+		t.Errorf("SAML row AuthURL: got %q", samlRow.SAMLError.AuthURL)
 	}
 }
 
