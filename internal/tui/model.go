@@ -448,8 +448,7 @@ func renderProgressBar(done, total, width int) string {
 }
 
 func (m *Model) refreshCmd() tea.Cmd {
-	query := m.config.Views[0].Query // Default for now
-	return fetchPRsCmd(m.ghClient, query)
+	return fetchPRsCmd(m.ghClient, m.configuredQuery())
 }
 
 func (m *Model) discoverSessionsCmd() tea.Cmd {
