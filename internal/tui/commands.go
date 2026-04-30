@@ -11,9 +11,13 @@ import (
 	"github.com/petems/pr-wrangler/internal/tmux"
 )
 
+// prsLoadedMsg is the final message in a fetch sequence. progressCh
+// identifies the source channel so the model can ignore stale completions
+// from a fetch that has been superseded (e.g., user pressed 'r' mid-fetch).
 type prsLoadedMsg struct {
-	prs []github.PR
-	err error
+	progressCh <-chan tea.Msg
+	prs        []github.PR
+	err        error
 }
 
 // prsFetchStartedMsg is delivered once the fetch goroutine is running. It
@@ -24,9 +28,12 @@ type prsFetchStartedMsg struct {
 }
 
 // prsProgressMsg reports detail-fetch progress: done out of total PRs.
+// progressCh identifies the source channel; messages from a superseded
+// fetch are dropped without updating the model.
 type prsProgressMsg struct {
-	done  int
-	total int
+	progressCh <-chan tea.Msg
+	done       int
+	total      int
 }
 
 type sessionsDiscoveredMsg struct {
@@ -64,17 +71,20 @@ type sessionReadyMsg struct {
 func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan tea.Msg, 64)
+		// recv is the receive-only handle stamped onto every message so the
+		// model can identify which fetch each message belongs to.
+		var recv <-chan tea.Msg = ch
 		go func() {
 			defer close(ch)
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
 			prs, err := ghClient.FetchPRs(ctx, query, func(done, total int) {
-				ch <- prsProgressMsg{done: done, total: total}
+				ch <- prsProgressMsg{progressCh: recv, done: done, total: total}
 			})
-			ch <- prsLoadedMsg{prs: prs, err: err}
+			ch <- prsLoadedMsg{progressCh: recv, prs: prs, err: err}
 		}()
-		return prsFetchStartedMsg{progressCh: ch}
+		return prsFetchStartedMsg{progressCh: recv}
 	}
 }
 

@@ -127,13 +127,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForFetchMsgCmd(msg.progressCh)
 
 	case prsProgressMsg:
+		// Drop messages from a superseded fetch. Keep draining their
+		// channel so the old goroutine isn't blocked on a full buffer.
+		if msg.progressCh != m.progressCh {
+			return m, waitForFetchMsgCmd(msg.progressCh)
+		}
 		m.progressDone = msg.done
 		m.progressTotal = msg.total
-		if m.progressCh != nil {
-			return m, waitForFetchMsgCmd(m.progressCh)
-		}
+		return m, waitForFetchMsgCmd(m.progressCh)
 
 	case prsLoadedMsg:
+		// Stale completion — drain to channel close and discard.
+		if msg.progressCh != m.progressCh {
+			return m, waitForFetchMsgCmd(msg.progressCh)
+		}
 		m.loading = false
 		m.progressCh = nil
 		m.progressDone = 0
