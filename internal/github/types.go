@@ -148,3 +148,13 @@ func (e *SAMLAuthError) Error() string {
 func (e *SAMLAuthError) Unwrap() error {
 	return e.OriginalError
 }
+
+// SAMLErrorEntry pairs a SAML auth error with its original search-result
+// position so callers can interleave SAML rows back into the PR list at the
+// correct sequence instead of appending them in non-deterministic order.
+type SAMLErrorEntry struct {
+	Index             int
+	RepoNameWithOwner string
+	PRNumber          int
+	Err               *SAMLAuthError
+}

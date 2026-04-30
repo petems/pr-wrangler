@@ -62,46 +62,68 @@ func TestBuildRows_Empty(t *testing.T) {
 }
 
 func TestBuildRows_WithSAMLErrors(t *testing.T) {
+	// Original positions: 0=PR#1, 1=SAML#30, 2=PR#2. Expected output order
+	// after interleaving: [PR#1, SAML#30, PR#2].
 	prs := []github.PR{
-		{Number: 1, Title: "Open PR", State: github.PRStateOpen, RepoNameWithOwner: "org/repo1"},
+		{Number: 1, Title: "Open PR 1", State: github.PRStateOpen, RepoNameWithOwner: "org/repo1"},
+		{Number: 2, Title: "Open PR 2", State: github.PRStateOpen, RepoNameWithOwner: "org/repo3"},
 	}
 
-	samlErrors := map[string]*github.SAMLAuthError{
-		"org/repo2#30": {
-			Message: "Resource protected by organization SAML",
-			AuthURL: "https://github.com/enterprises/example-org/sso?authorization_request=ABC123",
+	samlErrors := []github.SAMLErrorEntry{
+		{
+			Index:             1,
+			RepoNameWithOwner: "org/repo2",
+			PRNumber:          30,
+			Err: &github.SAMLAuthError{
+				Message: "Resource protected by organization SAML",
+				AuthURL: "https://github.com/enterprises/example-org/sso?authorization_request=ABC123",
+			},
 		},
 	}
 
 	rows := buildRows(prs, samlErrors)
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows (1 normal + 1 SAML), got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
 
-	// Find the SAML row
-	var samlRow *PRRow
-	for i := range rows {
-		if rows[i].Status == github.PRStatusSAMLRequired {
-			samlRow = &rows[i]
-			break
-		}
+	if rows[0].PR.Number != 1 {
+		t.Errorf("rows[0]: expected PR#1, got #%d", rows[0].PR.Number)
+	}
+	if rows[1].Status != github.PRStatusSAMLRequired || rows[1].PR.Number != 30 {
+		t.Errorf("rows[1]: expected SAML PR#30, got status=%q number=%d", rows[1].Status, rows[1].PR.Number)
+	}
+	if rows[2].PR.Number != 2 {
+		t.Errorf("rows[2]: expected PR#2, got #%d", rows[2].PR.Number)
 	}
 
-	if samlRow == nil {
-		t.Fatal("expected a SAML row, but found none")
+	saml := rows[1]
+	if saml.Action != github.ActionAuthorizeSAML {
+		t.Errorf("SAML row action: got %q, want %q", saml.Action, github.ActionAuthorizeSAML)
+	}
+	if saml.SAMLError == nil || saml.SAMLError.AuthURL != "https://github.com/enterprises/example-org/sso?authorization_request=ABC123" {
+		t.Errorf("SAML row AuthURL: got %+v", saml.SAMLError)
+	}
+}
+
+func TestBuildRows_SAMLWithoutAuthURL_ActionNone(t *testing.T) {
+	// When parseSAMLError can't extract a URL, the row should not show
+	// the "Authorize SAML" affordance — pressing 'a' would no-op.
+	prs := []github.PR{}
+	samlErrors := []github.SAMLErrorEntry{
+		{
+			Index:             0,
+			RepoNameWithOwner: "org/repo",
+			PRNumber:          7,
+			Err:               &github.SAMLAuthError{Message: "SAML"}, // AuthURL empty
+		},
 	}
 
-	if samlRow.PR.Number != 30 {
-		t.Errorf("SAML row: got PR #%d, want #30", samlRow.PR.Number)
+	rows := buildRows(prs, samlErrors)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
-	if samlRow.Action != github.ActionAuthorizeSAML {
-		t.Errorf("SAML row action: got %q, want %q", samlRow.Action, github.ActionAuthorizeSAML)
-	}
-	if samlRow.SAMLError == nil {
-		t.Error("SAML row should have SAMLError set")
-	}
-	if samlRow.SAMLError != nil && samlRow.SAMLError.AuthURL != "https://github.com/enterprises/example-org/sso?authorization_request=ABC123" {
-		t.Errorf("SAML row AuthURL: got %q", samlRow.SAMLError.AuthURL)
+	if rows[0].Action != github.ActionNone {
+		t.Errorf("expected ActionNone for SAML row without URL, got %q", rows[0].Action)
 	}
 }
 

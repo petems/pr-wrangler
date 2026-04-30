@@ -17,7 +17,7 @@ import (
 type prsLoadedMsg struct {
 	progressCh <-chan tea.Msg
 	prs        []github.PR
-	samlErrors map[string]*github.SAMLAuthError
+	samlErrors []github.SAMLErrorEntry
 	err        error
 }
 

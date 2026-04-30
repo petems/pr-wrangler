@@ -92,22 +92,25 @@ func parseSAMLError(err error) (*SAMLAuthError, bool) {
 	return samlErr, true
 }
 
+// samlAuthURLPattern matches GitHub's SAML SSO authorization URL. Both
+// org-level (/orgs/<org>/sso) and enterprise-level (/enterprises/<ent>/sso)
+// shapes are accepted. The token charset is intentionally permissive
+// (alphanumerics plus `._-`) so we don't need to chase token-format changes.
+var samlAuthURLPattern = regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Za-z0-9._-]+`)
+
 // extractSAMLAuthURL pulls the SAML SSO authorization URL out of the
 // X-GitHub-SSO response header (preferred) or the error message body
-// (fallback). Org-level SAML uses /orgs/<org>/sso while enterprise-level
-// uses /enterprises/<enterprise>/sso. The header value is typically
-// `required; url=<URL>` when authorization is required.
+// (fallback). The header value is typically `required; url=<URL>` when
+// authorization is required.
 func extractSAMLAuthURL(ssoHeader, message string) string {
-	urlPattern := regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Z0-9]+`)
-
 	// Skip "partial-results; organizations=..." which carries no URL.
 	if ssoHeader != "" && !strings.HasPrefix(strings.TrimSpace(ssoHeader), "partial-results") {
-		if match := urlPattern.FindString(ssoHeader); match != "" {
+		if match := samlAuthURLPattern.FindString(ssoHeader); match != "" {
 			return match
 		}
 	}
 
-	if match := urlPattern.FindString(message); match != "" {
+	if match := samlAuthURLPattern.FindString(message); match != "" {
 		return match
 	}
 
@@ -392,11 +395,13 @@ func prSearchQuery(query string) string {
 	return query
 }
 
-// FetchResult holds the result of fetching PRs, including both successful
-// PRs and any errors encountered (mapped by PR number and repo).
+// FetchResult holds the result of fetching PRs. PRs are returned in original
+// search-API (updated-desc) order with SAML positions removed; Errors carries
+// the SAML failures with their original index so the UI can re-interleave them
+// back into the list deterministically.
 type FetchResult struct {
 	PRs    []PR
-	Errors map[string]*SAMLAuthError // key: "owner/repo#number"
+	Errors []SAMLErrorEntry
 }
 
 // FetchPRs discovers PRs matching the query and fetches full details for each.
@@ -474,16 +479,22 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 
 	// Place each successful PR at its original index so the returned slice
 	// preserves the search API's updated-desc ordering, regardless of the
-	// completion order of the concurrent detail fetches.
+	// completion order of the concurrent detail fetches. SAML errors are
+	// kept in a parallel slice tagged with their original index so the UI
+	// can interleave them back at the right position.
 	prs := make([]PR, total)
 	hasResult := make([]bool, total)
-	samlErrors := make(map[string]*SAMLAuthError)
+	samlByIdx := make([]*SAMLErrorEntry, total)
 	done := 0
 
 	for result := range ch {
 		if result.samlErr != nil {
-			key := fmt.Sprintf("%s#%d", result.repoInfo.RepoNameWithOwner, result.repoInfo.Number)
-			samlErrors[key] = result.samlErr
+			samlByIdx[result.idx] = &SAMLErrorEntry{
+				Index:             result.idx,
+				RepoNameWithOwner: result.repoInfo.RepoNameWithOwner,
+				PRNumber:          result.repoInfo.Number,
+				Err:               result.samlErr,
+			}
 			done++
 			if progress != nil {
 				progress(done, total)
@@ -502,15 +513,18 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 	}
 
 	filtered := make([]PR, 0, total)
-	for i, has := range hasResult {
-		if has {
+	samlEntries := make([]SAMLErrorEntry, 0)
+	for i := range total {
+		if hasResult[i] {
 			filtered = append(filtered, prs[i])
+		} else if samlByIdx[i] != nil {
+			samlEntries = append(samlEntries, *samlByIdx[i])
 		}
 	}
 
 	return FetchResult{
 		PRs:    filtered,
-		Errors: samlErrors,
+		Errors: samlEntries,
 	}, nil
 }
 

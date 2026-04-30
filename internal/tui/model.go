@@ -66,8 +66,9 @@ type Model struct {
 	// Sessions
 	prSessions map[int]tmux.PRSession
 
-	// SAML errors for PRs that couldn't be fetched
-	samlErrors map[string]*github.SAMLAuthError
+	// SAML errors for PRs that couldn't be fetched, ordered by original
+	// search-result position so they can be interleaved with the PR list.
+	samlErrors []github.SAMLErrorEntry
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
@@ -495,52 +496,59 @@ func (m Model) rebuildTable() table.Model {
 	return t
 }
 
-func buildRows(prs []github.PR, samlErrors map[string]*github.SAMLAuthError) []PRRow {
+// buildRows interleaves successful PRs and SAML-protected placeholders back
+// into a single list in the original search-API ordering. prs is in original
+// order with SAML positions removed; samlErrors carries each SAML failure
+// tagged with its original index. Merged/closed PRs are filtered out.
+func buildRows(prs []github.PR, samlErrors []github.SAMLErrorEntry) []PRRow {
 	var rows []PRRow
-	for _, pr := range prs {
-		if pr.State == github.PRStateMerged || pr.State == github.PRStateClosed {
-			continue
-		}
-		status := github.DetermineStatus(pr)
-		action := github.DetermineAction(status)
-		rows = append(rows, PRRow{
-			PR:      pr,
-			Status:  status,
-			Action:  action,
-			RowType: RowTypePR,
-		})
-	}
+	prIdx := 0
+	samlIdx := 0
+	originalPos := 0
 
-	// Add rows for SAML-protected PRs
-	for key, samlErr := range samlErrors {
-		// Parse the key to extract repo and PR number
-		// Key format: "owner/repo#number"
-		parts := strings.SplitN(key, "#", 2)
-		if len(parts) != 2 {
-			continue
+	for prIdx < len(prs) || samlIdx < len(samlErrors) {
+		if samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos {
+			rows = append(rows, samlPlaceholderRow(samlErrors[samlIdx]))
+			samlIdx++
+		} else {
+			pr := prs[prIdx]
+			if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
+				status := github.DetermineStatus(pr)
+				rows = append(rows, PRRow{
+					PR:      pr,
+					Status:  status,
+					Action:  github.DetermineAction(status),
+					RowType: RowTypePR,
+				})
+			}
+			prIdx++
 		}
-		repoWithOwner := parts[0]
-		var prNumber int
-		fmt.Sscanf(parts[1], "%d", &prNumber)
-
-		// Create a minimal PR object for display
-		pr := github.PR{
-			Number:            prNumber,
-			Title:             "SAML Authorization Required",
-			RepoNameWithOwner: repoWithOwner,
-			State:             github.PRStateOpen,
-		}
-
-		rows = append(rows, PRRow{
-			PR:        pr,
-			Status:    github.PRStatusSAMLRequired,
-			Action:    github.ActionAuthorizeSAML,
-			RowType:   RowTypePR,
-			SAMLError: samlErr,
-		})
+		originalPos++
 	}
 
 	return rows
+}
+
+// samlPlaceholderRow builds a PRRow for a SAML-protected PR that couldn't be
+// fetched. Action falls back to ActionNone when no authorization URL was
+// extracted, since pressing 'a' would otherwise no-op silently.
+func samlPlaceholderRow(entry github.SAMLErrorEntry) PRRow {
+	action := github.ActionAuthorizeSAML
+	if entry.Err == nil || entry.Err.AuthURL == "" {
+		action = github.ActionNone
+	}
+	return PRRow{
+		PR: github.PR{
+			Number:            entry.PRNumber,
+			Title:             "SAML Authorization Required",
+			RepoNameWithOwner: entry.RepoNameWithOwner,
+			State:             github.PRStateOpen,
+		},
+		Status:    github.PRStatusSAMLRequired,
+		Action:    action,
+		RowType:   RowTypePR,
+		SAMLError: entry.Err,
+	}
 }
 
 func (m *Model) openSelectedPR() tea.Cmd {
@@ -586,8 +594,12 @@ func (m Model) switchToSession() tea.Cmd {
 	r := m.rows[idx]
 
 	if r.Status == github.PRStatusSAMLRequired {
+		msg := "authorize SAML for this org outside the app, then refresh"
+		if r.SAMLError != nil && r.SAMLError.AuthURL != "" {
+			msg = "authorize SAML first (press 'a' to open auth URL)"
+		}
 		return func() tea.Msg {
-			return sessionErrorMsg{err: fmt.Errorf("authorize SAML first (press 'a' to open auth URL)")}
+			return sessionErrorMsg{err: fmt.Errorf("%s", msg)}
 		}
 	}
 
