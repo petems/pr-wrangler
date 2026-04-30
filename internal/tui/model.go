@@ -120,6 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
+		m.table = m.table.WithRows(m.buildTableRows())
 		return m, cmd
 
 	case tea.WindowSizeMsg:
@@ -199,11 +200,11 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("PR Wrangler"))
+	b.WriteString(titleStyle.Render("PR Status Dashboard"))
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(helpStyle.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	if w := queryWarning(m.configuredQuery()); w != "" {
 		b.WriteString(warningStyle.Render(w))
 		b.WriteString("\n")
@@ -469,31 +470,52 @@ func (m *Model) applyFilters() {
 }
 
 func (m Model) rebuildTable() table.Model {
+	titleWidth := m.width - 82
+	if titleWidth < 10 {
+		titleWidth = 10
+	}
 	columns := []table.Column{
+		table.NewColumn("indicator", " ", 2),
 		table.NewColumn("repo", "Repo", 20),
 		table.NewColumn("pr", "PR", 8),
-		table.NewColumn("title", "Title", m.width-80),
+		table.NewColumn("title", "Title", titleWidth),
 		table.NewColumn("status", "Status", 20),
 		table.NewColumn("action", "Action", 20),
 	}
 
-	var tableRows []table.Row
-	for _, r := range m.rows {
-		tableRows = append(tableRows, table.NewRow(table.RowData{
-			"repo":   truncate(extractRepoName(r.PR.RepoNameWithOwner), 20),
-			"pr":     fmt.Sprintf("#%d", r.PR.Number),
-			"title":  truncate(r.PR.Title, m.width-80),
-			"status": r.Status.String(),
-			"action": r.Action.String(),
-		}))
-	}
-
 	t := table.New(columns).
-		WithRows(tableRows).
+		WithRows(m.buildTableRows()).
 		Focused(true).
-		WithBaseStyle(lipgloss.NewStyle().Foreground(white))
+		WithPageSize(20).
+		WithBaseStyle(lipgloss.NewStyle().Foreground(white)).
+		HighlightStyle(selectedRowStyle)
 
 	return t
+}
+
+func (m Model) buildTableRows() []table.Row {
+	titleWidth := m.width - 82
+	if titleWidth < 10 {
+		titleWidth = 10
+	}
+	highlighted := m.table.GetHighlightedRowIndex()
+
+	tableRows := make([]table.Row, 0, len(m.rows))
+	for i, r := range m.rows {
+		indicator := " "
+		if i == highlighted {
+			indicator = ">"
+		}
+		tableRows = append(tableRows, table.NewRow(table.RowData{
+			"indicator": table.NewStyledCell(indicator, indicatorStyle),
+			"repo":      truncate(extractRepoName(r.PR.RepoNameWithOwner), 20),
+			"pr":        fmt.Sprintf("#%d", r.PR.Number),
+			"title":     truncate(r.PR.Title, titleWidth),
+			"status":    r.Status.String(),
+			"action":    r.Action.String(),
+		}))
+	}
+	return tableRows
 }
 
 // buildRows interleaves successful PRs and SAML-protected placeholders back
