@@ -469,38 +469,63 @@ func (m *Model) applyFilters() {
 	// TODO: implement filtering
 }
 
-func (m Model) rebuildTable() table.Model {
-	titleWidth := m.width - 82
-	if titleWidth < 10 {
-		titleWidth = 10
+// Layout constants for the table view.
+const (
+	// nonTitleColumnsWidth reserves columns/padding around the Title column:
+	// indicator (2) + repo (20) + pr (8) + status (20) + action (20) plus
+	// per-column padding/borders.
+	nonTitleColumnsWidth = 82
+	minTitleColumnWidth  = 10
+	// tableChromeLines reserves rows of the terminal for non-table chrome
+	// in View(): title row, blank spacer, table header, table footer,
+	// trailing newline, help line, plus a small margin for transient
+	// warning/error/notification lines.
+	tableChromeLines = 8
+	minPageSize      = 5
+)
+
+// titleColumnWidth returns the width to allocate to the Title column.
+func (m Model) titleColumnWidth() int {
+	w := m.width - nonTitleColumnsWidth
+	if w < minTitleColumnWidth {
+		return minTitleColumnWidth
 	}
+	return w
+}
+
+// tablePageSize returns the table page size based on the available
+// terminal height, leaving room for title, table header/footer, and the
+// help line.
+func (m Model) tablePageSize() int {
+	if m.height <= tableChromeLines+minPageSize {
+		return minPageSize
+	}
+	return m.height - tableChromeLines
+}
+
+func (m Model) rebuildTable() table.Model {
 	columns := []table.Column{
 		table.NewColumn("indicator", " ", 2),
 		table.NewColumn("repo", "Repo", 20),
 		table.NewColumn("pr", "PR", 8),
-		table.NewColumn("title", "Title", titleWidth),
+		table.NewColumn("title", "Title", m.titleColumnWidth()),
 		table.NewColumn("status", "Status", 20),
 		table.NewColumn("action", "Action", 20),
 	}
 
 	highlighted := m.table.GetHighlightedRowIndex()
 
-	t := table.New(columns).
+	return table.New(columns).
 		WithRows(m.buildTableRows()).
 		Focused(true).
-		WithPageSize(20).
+		WithPageSize(m.tablePageSize()).
 		WithBaseStyle(lipgloss.NewStyle().Foreground(white)).
 		HighlightStyle(selectedRowStyle).
 		WithHighlightedRow(highlighted)
-
-	return t
 }
 
 func (m Model) buildTableRows() []table.Row {
-	titleWidth := m.width - 82
-	if titleWidth < 10 {
-		titleWidth = 10
-	}
+	titleWidth := m.titleColumnWidth()
 	highlighted := m.table.GetHighlightedRowIndex()
 
 	tableRows := make([]table.Row, 0, len(m.rows))
