@@ -16,6 +16,19 @@ type prsLoadedMsg struct {
 	err error
 }
 
+// prsFetchStartedMsg is delivered once the fetch goroutine is running. It
+// carries the channel the model should drain for streaming progress and the
+// final result.
+type prsFetchStartedMsg struct {
+	progressCh <-chan tea.Msg
+}
+
+// prsProgressMsg reports detail-fetch progress: done out of total PRs.
+type prsProgressMsg struct {
+	done  int
+	total int
+}
+
 type sessionsDiscoveredMsg struct {
 	sessions map[int]tmux.PRSession
 }
@@ -44,13 +57,36 @@ type sessionReadyMsg struct {
 	windowName  string
 }
 
+// fetchPRsCmd kicks off the PR fetch in a background goroutine and returns
+// immediately with a prsFetchStartedMsg carrying a channel. The model drains
+// the channel via waitForFetchMsgCmd to receive streaming progress updates
+// and the final prsLoadedMsg.
 func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
+		ch := make(chan tea.Msg, 64)
+		go func() {
+			defer close(ch)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
 
-		prs, err := ghClient.FetchPRs(ctx, query)
-		return prsLoadedMsg{prs: prs, err: err}
+			prs, err := ghClient.FetchPRs(ctx, query, func(done, total int) {
+				ch <- prsProgressMsg{done: done, total: total}
+			})
+			ch <- prsLoadedMsg{prs: prs, err: err}
+		}()
+		return prsFetchStartedMsg{progressCh: ch}
+	}
+}
+
+// waitForFetchMsgCmd reads one message from the fetch channel. The model
+// re-dispatches it after each progress update until prsLoadedMsg arrives.
+func waitForFetchMsgCmd(ch <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
 	}
 }
 

@@ -51,6 +51,12 @@ type Model struct {
 
 	spinner spinner.Model
 
+	// PR fetch progress (detail phase). progressCh is non-nil while a fetch
+	// is in flight; progressTotal == 0 means search is still running.
+	progressCh    <-chan tea.Msg
+	progressDone  int
+	progressTotal int
+
 	// Overlays
 	showHelp bool
 
@@ -114,8 +120,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.table = m.rebuildTable()
 
+	case prsFetchStartedMsg:
+		m.progressCh = msg.progressCh
+		m.progressDone = 0
+		m.progressTotal = 0
+		return m, waitForFetchMsgCmd(msg.progressCh)
+
+	case prsProgressMsg:
+		m.progressDone = msg.done
+		m.progressTotal = msg.total
+		if m.progressCh != nil {
+			return m, waitForFetchMsgCmd(m.progressCh)
+		}
+
 	case prsLoadedMsg:
 		m.loading = false
+		m.progressCh = nil
+		m.progressDone = 0
+		m.progressTotal = 0
 		if msg.err != nil {
 			m.lastError = msg.err
 		} else {
@@ -163,7 +185,14 @@ func (m Model) View() string {
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("PR Wrangler"))
+	if q := m.configuredQuery(); q != "" {
+		b.WriteString(helpStyle.Render(fmt.Sprintf("  [query: %s]", q)))
+	}
 	b.WriteString("\n")
+	if w := queryWarning(m.configuredQuery()); w != "" {
+		b.WriteString(warningStyle.Render(w))
+		b.WriteString("\n")
+	}
 
 	b.WriteString(m.table.View())
 	b.WriteString("\n")
@@ -296,7 +325,119 @@ func (m Model) renderLoadingScreen() string {
 	if height == 0 {
 		height = 24
 	}
-	return renderCowsay(m.spinner.View(), width, height)
+
+	var b strings.Builder
+	b.WriteString(renderCowsay(m.spinner.View(), width, height))
+
+	// Centered status/query/warning under the cow — only while a fetch is
+	// in flight.
+	if m.progressCh != nil {
+		var status string
+		if m.progressTotal == 0 {
+			status = fmt.Sprintf("%s Searching for PRs...", m.spinner.View())
+		} else {
+			status = renderProgressBar(m.progressDone, m.progressTotal, progressBarWidth(width))
+		}
+		b.WriteString("\n")
+		b.WriteString(centerLine(loadingStyle.Render(status), width))
+		b.WriteString("\n")
+		if q := github.EffectiveQuery(m.configuredQuery()); q != "" {
+			b.WriteString(centerLine(helpStyle.Render(fmt.Sprintf("query: %s", q)), width))
+			b.WriteString("\n")
+		}
+		if w := queryWarning(m.configuredQuery()); w != "" {
+			b.WriteString(centerLine(warningStyle.Render(w), width))
+			b.WriteString("\n")
+		}
+	}
+
+	// Pin the config source line to the lower-left of the screen.
+	if src := configSourceLabel(m.config); src != "" {
+		body := b.String()
+		used := strings.Count(body, "\n")
+		pad := height - used - 1
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString(strings.Repeat("\n", pad))
+		b.WriteString(helpStyle.Render(src))
+	}
+
+	return b.String()
+}
+
+// configSourceLabel describes where the active config came from. Returns
+// "config: <path>" when a file was loaded, or "no config file at <path>
+// (using defaults)" when falling back to DefaultConfig.
+func configSourceLabel(cfg config.Config) string {
+	if cfg.Path == "" {
+		return ""
+	}
+	if cfg.Loaded {
+		return fmt.Sprintf("config: %s", cfg.Path)
+	}
+	return fmt.Sprintf("no config file at %s (using defaults)", cfg.Path)
+}
+
+// queryWarning returns a non-empty warning string when the configured query
+// has no state qualifier — those queries can return up to GitHub's 1000-result
+// search cap and trip secondary rate limits.
+func queryWarning(query string) string {
+	if query == "" {
+		return ""
+	}
+	lower := strings.ToLower(query)
+	if strings.Contains(lower, "is:open") ||
+		strings.Contains(lower, "is:closed") ||
+		strings.Contains(lower, "is:merged") {
+		return ""
+	}
+	return "Warning: query has no is:open / is:closed / is:merged filter — may return up to 1000 PRs and trip GitHub rate limits"
+}
+
+func centerLine(s string, width int) string {
+	pad := (width - lipgloss.Width(s)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	return strings.Repeat(" ", pad) + s
+}
+
+// configuredQuery returns the user's configured search query, or "" if none.
+func (m Model) configuredQuery() string {
+	if len(m.config.Views) == 0 {
+		return ""
+	}
+	return m.config.Views[0].Query
+}
+
+// progressBarWidth picks a sensible bar width for the given terminal width.
+func progressBarWidth(termWidth int) int {
+	const max = 40
+	w := termWidth - 20
+	if w > max {
+		return max
+	}
+	if w < 10 {
+		return 10
+	}
+	return w
+}
+
+// renderProgressBar produces "[█████░░░░░] 12/47 PRs".
+func renderProgressBar(done, total, width int) string {
+	if total <= 0 {
+		return ""
+	}
+	if done > total {
+		done = total
+	}
+	filled := done * width / total
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	return fmt.Sprintf("[%s] %d/%d PRs", bar, done, total)
 }
 
 func (m *Model) refreshCmd() tea.Cmd {

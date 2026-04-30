@@ -6,11 +6,12 @@ import (
 
 var (
 	// Colors
-	white = lipgloss.Color("#ffffff")
-	gray  = lipgloss.Color("#666666")
-	green = lipgloss.Color("#00ff00")
-	red   = lipgloss.Color("#ff0000")
-	cyan  = lipgloss.Color("#00ffff")
+	white  = lipgloss.Color("#ffffff")
+	gray   = lipgloss.Color("#666666")
+	green  = lipgloss.Color("#00ff00")
+	red    = lipgloss.Color("#ff0000")
+	cyan   = lipgloss.Color("#00ffff")
+	yellow = lipgloss.Color("#ffcc00")
 
 	// Text styles
 	helpColor = gray
@@ -29,6 +30,9 @@ var (
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(red)
+
+	warningStyle = lipgloss.NewStyle().
+			Foreground(yellow)
 
 	loadingStyle = lipgloss.NewStyle().
 			Foreground(cyan)

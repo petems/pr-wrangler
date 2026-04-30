@@ -56,6 +56,14 @@ type searchResult struct {
 	RepoNameWithOwner string
 }
 
+// EffectiveQuery returns the search string we hand to the GitHub Search API
+// for a given configured query — including the empty-query default and the
+// implicit "is:pr" suffix. Surfaced so the TUI can show users what they're
+// actually searching for.
+func EffectiveQuery(configured string) string {
+	return prSearchQuery(configured) + " is:pr"
+}
+
 // searchPRs uses the GitHub Search API via go-github.
 func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult, error) {
 	fullQuery := query + " is:pr"
@@ -321,7 +329,9 @@ func prSearchQuery(query string) string {
 }
 
 // FetchPRs discovers PRs matching the query and fetches full details for each.
-func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
+// If progress is non-nil it is invoked once with (0, total) after the search
+// phase, then once after each PR detail completes with (done, total).
+func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(done, total int)) ([]PR, error) {
 	query = prSearchQuery(query)
 
 	results, err := c.searchPRs(ctx, query)
@@ -330,7 +340,15 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
 	}
 
 	if len(results) == 0 {
+		if progress != nil {
+			progress(0, 0)
+		}
 		return nil, nil
+	}
+
+	total := len(results)
+	if progress != nil {
+		progress(0, total)
 	}
 
 	type indexedPR struct {
@@ -339,7 +357,7 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
 		err error
 	}
 
-	ch := make(chan indexedPR, len(results))
+	ch := make(chan indexedPR, total)
 	sem := make(chan struct{}, maxConcurrentPRDetails)
 	var wg sync.WaitGroup
 
@@ -376,12 +394,17 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string) ([]PR, error) {
 		close(ch)
 	}()
 
-	prs := make([]PR, len(results))
+	prs := make([]PR, total)
+	done := 0
 	for result := range ch {
 		if result.err != nil {
 			return nil, result.err
 		}
 		prs[result.idx] = result.pr
+		done++
+		if progress != nil {
+			progress(done, total)
+		}
 	}
 
 	return prs, nil
