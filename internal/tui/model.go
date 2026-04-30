@@ -194,13 +194,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// cowsayDashboard is the static cowsay shown in the main dashboard view.
+const cowsayDashboard = "" +
+	" _______________________________________\n" +
+	"< Mooo! Welcome to PR Wrangler, pardner >\n" +
+	" ---------------------------------------\n" +
+	"        \\   ^__^\n" +
+	"         \\  (oo)\\_______\n" +
+	"            (__)\\       )\\/\\\n" +
+	"                ||----w |\n" +
+	"                ||     ||"
+
 func (m Model) View() string {
 	if m.loading && len(m.allRows) == 0 {
 		return m.renderLoadingScreen()
 	}
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("PR Status Dashboard"))
+	b.WriteString(cowsayDashboard + "\n\n")
+	b.WriteString(titleStyle.Render("PR Wrangler"))
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(helpStyle.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
@@ -477,10 +489,10 @@ const (
 	nonTitleColumnsWidth = 82
 	minTitleColumnWidth  = 10
 	// tableChromeLines reserves rows of the terminal for non-table chrome
-	// in View(): title row, blank spacer, table header, table footer,
-	// trailing newline, help line, plus a small margin for transient
+	// in View(): cowsay (8), blank, title row, blank, table header, table
+	// footer, trailing newline, help line, plus margin for transient
 	// warning/error/notification lines.
-	tableChromeLines = 8
+	tableChromeLines = 15
 	minPageSize      = 5
 )
 
