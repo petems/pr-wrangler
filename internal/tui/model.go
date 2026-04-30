@@ -483,12 +483,15 @@ func (m Model) rebuildTable() table.Model {
 		table.NewColumn("action", "Action", 20),
 	}
 
+	highlighted := m.table.GetHighlightedRowIndex()
+
 	t := table.New(columns).
 		WithRows(m.buildTableRows()).
 		Focused(true).
 		WithPageSize(20).
 		WithBaseStyle(lipgloss.NewStyle().Foreground(white)).
-		HighlightStyle(selectedRowStyle)
+		HighlightStyle(selectedRowStyle).
+		WithHighlightedRow(highlighted)
 
 	return t
 }
