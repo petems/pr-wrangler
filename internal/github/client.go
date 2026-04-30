@@ -75,9 +75,9 @@ func parseSAMLError(err error) (*SAMLAuthError, bool) {
 		return nil, false
 	}
 
-	// Extract the SSO authorization URL using regex
-	// Pattern: https://github.com/enterprises/*/sso?authorization_request=*
-	urlPattern := regexp.MustCompile(`https://github\.com/enterprises/[^/]+/sso\?authorization_request=[A-Z0-9]+`)
+	// Extract the SSO authorization URL using regex.
+	// Org-level SAML uses /orgs/<org>/sso, enterprise-level uses /enterprises/<enterprise>/sso.
+	urlPattern := regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Z0-9]+`)
 	matches := urlPattern.FindStringSubmatch(message)
 
 	samlErr := &SAMLAuthError{

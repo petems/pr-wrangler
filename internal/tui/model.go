@@ -549,6 +549,9 @@ func (m *Model) openSelectedPR() tea.Cmd {
 		return nil
 	}
 	r := m.rows[idx]
+	if r.PR.URL == "" {
+		return nil
+	}
 	return func() tea.Msg {
 		openBrowser(r.PR.URL)
 		return nil
@@ -581,6 +584,12 @@ func (m Model) switchToSession() tea.Cmd {
 		}
 	}
 	r := m.rows[idx]
+
+	if r.Status == github.PRStatusSAMLRequired {
+		return func() tea.Msg {
+			return sessionErrorMsg{err: fmt.Errorf("authorize SAML first (press 'a' to open auth URL)")}
+		}
+	}
 
 	repoName := extractRepoName(r.PR.RepoNameWithOwner)
 	repoDir := m.sessionMgr.RepoDir(repoName)

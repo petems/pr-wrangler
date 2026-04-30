@@ -461,6 +461,26 @@ func TestParseSAMLError_ValidSAMLError(t *testing.T) {
 	}
 }
 
+func TestParseSAMLError_OrgLevelURL(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. Visit https://github.com/orgs/example-org/sso?authorization_request=ORGAUTHTOKEN456",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected error to be identified as SAML error")
+	}
+	if samlErr == nil {
+		t.Fatal("expected samlErr to be non-nil")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=ORGAUTHTOKEN456" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+}
+
 func TestParseSAMLError_Non403Error(t *testing.T) {
 	ghErr := &gh.ErrorResponse{
 		Response: &http.Response{
