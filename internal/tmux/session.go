@@ -227,3 +227,42 @@ func (m *SessionManager) SwitchToSession(ctx context.Context, sessionName string
 	_, err := m.Runner.Run(ctx, "tmux", "attach-session", "-t", sessionName)
 	return err
 }
+
+// RepoInfoFromPath resolves git repo name, branch, and worktree root from any
+// directory within a git repository. Works for both the main worktree and any
+// auxiliary worktree created via `git worktree add`.
+func (m *SessionManager) RepoInfoFromPath(ctx context.Context, path string) (RepoInfo, error) {
+	out, err := m.Runner.Run(ctx, "git", "-C", path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return RepoInfo{}, fmt.Errorf("not a git repo: %w", err)
+	}
+	worktreePath := strings.TrimSpace(string(out))
+
+	out, err = m.Runner.Run(ctx, "git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return RepoInfo{}, fmt.Errorf("getting branch: %w", err)
+	}
+	branch := strings.TrimSpace(string(out))
+
+	out, err = m.Runner.Run(ctx, "git", "-C", path, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return RepoInfo{}, fmt.Errorf("getting git common dir: %w", err)
+	}
+	commonDir := strings.TrimSpace(string(out))
+
+	var repoDir string
+	if commonDir == ".git" {
+		// Main worktree: --git-common-dir returns the relative literal ".git".
+		repoDir = worktreePath
+	} else {
+		// Auxiliary worktree: commonDir is an absolute path like
+		// /home/user/projects/myrepo/.git — repo root is its parent.
+		repoDir = filepath.Dir(commonDir)
+	}
+
+	return RepoInfo{
+		Repo:         filepath.Base(repoDir),
+		Branch:       branch,
+		WorktreePath: worktreePath,
+	}, nil
+}
