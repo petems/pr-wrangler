@@ -507,22 +507,29 @@ func buildRows(prs []github.PR, samlErrors []github.SAMLErrorEntry) []PRRow {
 	originalPos := 0
 
 	for prIdx < len(prs) || samlIdx < len(samlErrors) {
-		if samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos {
+		samlMatches := samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos
+		// Consume a SAML entry when its Index lines up, OR when prs is
+		// exhausted but SAML entries remain (only possible if the invariant
+		// from FetchPRs has drifted; treat as defensive fallback).
+		if samlMatches || prIdx >= len(prs) {
 			rows = append(rows, samlPlaceholderRow(samlErrors[samlIdx]))
 			samlIdx++
-		} else {
-			pr := prs[prIdx]
-			if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
-				status := github.DetermineStatus(pr)
-				rows = append(rows, PRRow{
-					PR:      pr,
-					Status:  status,
-					Action:  github.DetermineAction(status),
-					RowType: RowTypePR,
-				})
-			}
-			prIdx++
+			originalPos++
+			continue
 		}
+		// Bounds verified above: the prsExhausted branch above continues, so
+		// reaching this line implies prIdx < len(prs).
+		pr := prs[prIdx] // #nosec G602 -- guarded by prsExhausted check above
+		if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
+			status := github.DetermineStatus(pr)
+			rows = append(rows, PRRow{
+				PR:      pr,
+				Status:  status,
+				Action:  github.DetermineAction(status),
+				RowType: RowTypePR,
+			})
+		}
+		prIdx++
 		originalPos++
 	}
 
