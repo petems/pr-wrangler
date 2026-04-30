@@ -23,13 +23,18 @@ type Config struct {
 	ServiceLabelPrefix string            `yaml:"service_label_prefix"`
 	AgentCommands      map[string]string `yaml:"agent_commands"`
 	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
+
+	// Path is the file path consulted during Load. Set even when the file
+	// does not exist (in which case Loaded is false). Not serialized.
+	Path   string `yaml:"-"`
+	Loaded bool   `yaml:"-"`
 }
 
 // DefaultConfig returns a config with a single default view and generalized defaults
 func DefaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		Views:              []View{{Name: "My PRs", Query: "author:@me", Default: true}},
+		Views:              []View{{Name: "My PRs", Query: "author:@me is:open", Default: true}},
 		RepoBaseDir:        filepath.Join(home, "projects"),
 		ServiceLabelPrefix: "service:",
 		AgentCommands: map[string]string{
@@ -51,12 +56,15 @@ func ConfigPath() (string, error) {
 	return filepath.Join(dir, "pr-wrangler", "config.yaml"), nil
 }
 
-// Load reads config from ~/.config/pr-wrangler/config.yaml.
-// Returns DefaultConfig if the file does not exist.
+// Load reads config from the OS-appropriate config dir
+// (~/.config/pr-wrangler/config.yaml on Linux, ~/Library/Application
+// Support/pr-wrangler/config.yaml on macOS). Returns DefaultConfig if the
+// file does not exist.
 func Load() (Config, error) {
 	path, err := ConfigPath()
 	if err != nil {
-		return DefaultConfig(), nil
+		cfg := DefaultConfig()
+		return cfg, nil
 	}
 	return LoadFromPath(path)
 }
@@ -86,7 +94,10 @@ func LoadFromPath(path string) (Config, error) {
 
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return DefaultConfig(), nil
+			cfg := DefaultConfig()
+			cfg.Path = path
+			cfg.Loaded = false
+			return cfg, nil
 		}
 		return Config{}, fmt.Errorf("reading config: %w", err)
 	}
@@ -109,5 +120,7 @@ func LoadFromPath(path string) (Config, error) {
 		cfg.AgentCommands = DefaultConfig().AgentCommands
 	}
 
+	cfg.Path = path
+	cfg.Loaded = true
 	return cfg, nil
 }
