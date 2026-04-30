@@ -12,8 +12,9 @@ import (
 )
 
 type prsLoadedMsg struct {
-	prs []github.PR
-	err error
+	prs        []github.PR
+	samlErrors map[string]*github.SAMLAuthError
+	err        error
 }
 
 type sessionsDiscoveredMsg struct {
@@ -49,8 +50,8 @@ func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		prs, err := ghClient.FetchPRs(ctx, query)
-		return prsLoadedMsg{prs: prs, err: err}
+		result, err := ghClient.FetchPRs(ctx, query)
+		return prsLoadedMsg{prs: result.PRs, samlErrors: result.Errors, err: err}
 	}
 }
 

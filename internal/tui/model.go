@@ -32,6 +32,7 @@ type PRRow struct {
 	AgentStatus  string
 	TmuxSession  string
 	WorktreePath string
+	SAMLError    *github.SAMLAuthError
 }
 
 type Model struct {
@@ -58,6 +59,9 @@ type Model struct {
 
 	// Sessions
 	prSessions map[int]tmux.PRSession
+
+	// SAML errors for PRs that couldn't be fetched
+	samlErrors map[string]*github.SAMLAuthError
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
@@ -103,6 +107,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchToSession()
 		case "o":
 			return m, m.openSelectedPR()
+		case "a":
+			return m, m.openSAMLAuthURL()
 		}
 
 		var cmd tea.Cmd
@@ -119,7 +125,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastError = msg.err
 		} else {
-			m.allRows = buildRows(msg.prs)
+			m.samlErrors = msg.samlErrors
+			m.allRows = buildRows(msg.prs, msg.samlErrors)
 			m.applyFilters()
 			m.table = m.rebuildTable()
 		}
@@ -341,7 +348,7 @@ func (m Model) rebuildTable() table.Model {
 	return t
 }
 
-func buildRows(prs []github.PR) []PRRow {
+func buildRows(prs []github.PR, samlErrors map[string]*github.SAMLAuthError) []PRRow {
 	var rows []PRRow
 	for _, pr := range prs {
 		if pr.State == github.PRStateMerged || pr.State == github.PRStateClosed {
@@ -356,6 +363,36 @@ func buildRows(prs []github.PR) []PRRow {
 			RowType: RowTypePR,
 		})
 	}
+
+	// Add rows for SAML-protected PRs
+	for key, samlErr := range samlErrors {
+		// Parse the key to extract repo and PR number
+		// Key format: "owner/repo#number"
+		parts := strings.SplitN(key, "#", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		repoWithOwner := parts[0]
+		var prNumber int
+		fmt.Sscanf(parts[1], "%d", &prNumber)
+
+		// Create a minimal PR object for display
+		pr := github.PR{
+			Number:            prNumber,
+			Title:             "SAML Authorization Required",
+			RepoNameWithOwner: repoWithOwner,
+			State:             github.PRStateOpen,
+		}
+
+		rows = append(rows, PRRow{
+			PR:        pr,
+			Status:    github.PRStatusSAMLRequired,
+			Action:    github.ActionAuthorizeSAML,
+			RowType:   RowTypePR,
+			SAMLError: samlErr,
+		})
+	}
+
 	return rows
 }
 
@@ -367,6 +404,24 @@ func (m *Model) openSelectedPR() tea.Cmd {
 	r := m.rows[idx]
 	return func() tea.Msg {
 		openBrowser(r.PR.URL)
+		return nil
+	}
+}
+
+func (m *Model) openSAMLAuthURL() tea.Cmd {
+	idx := m.table.GetHighlightedRowIndex()
+	if idx < 0 || idx >= len(m.rows) {
+		return nil
+	}
+	r := m.rows[idx]
+
+	// Only open SAML auth URL if this is a SAML-protected PR
+	if r.SAMLError == nil || r.SAMLError.AuthURL == "" {
+		return nil
+	}
+
+	return func() tea.Msg {
+		openBrowser(r.SAMLError.AuthURL)
 		return nil
 	}
 }
@@ -415,6 +470,7 @@ var helpEntries = []helpEntry{
 	{"r", "r", "refresh", "refresh PRs"},
 	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
 	{"o", "o", "open", "open selected PR in browser"},
+	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
 	{"?", "?", "help", "toggle help"},
 }
 

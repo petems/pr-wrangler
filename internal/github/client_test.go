@@ -2,6 +2,8 @@ package github
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -431,4 +433,73 @@ func TestTokenInfo_IsExpired(t *testing.T) {
 			t.Error("future ExpiresAt should not be expired")
 		}
 	})
+}
+
+func TestParseSAMLError_ValidSAMLError(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. Visit https://github.com/enterprises/datadog-inc/sso?authorization_request=AAID6C3QAOPBJVQHWR34RCTJ6KW5ZA5NM",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected error to be identified as SAML error")
+	}
+	if samlErr == nil {
+		t.Fatal("expected samlErr to be non-nil")
+	}
+	if samlErr.Message != "Resource protected by organization SAML" {
+		t.Errorf("Message: got %q", samlErr.Message)
+	}
+	if samlErr.AuthURL != "https://github.com/enterprises/datadog-inc/sso?authorization_request=AAID6C3QAOPBJVQHWR34RCTJ6KW5ZA5NM" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+	if samlErr.OriginalError != ghErr {
+		t.Error("OriginalError should be set to the original error")
+	}
+}
+
+func TestParseSAMLError_Non403Error(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 404,
+		},
+		Message: "Not found",
+	}
+
+	_, isSAML := parseSAMLError(ghErr)
+	if isSAML {
+		t.Error("404 error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_Non_SAML_403(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Forbidden for some other reason",
+	}
+
+	_, isSAML := parseSAMLError(ghErr)
+	if isSAML {
+		t.Error("non-SAML 403 error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_NilError(t *testing.T) {
+	_, isSAML := parseSAMLError(nil)
+	if isSAML {
+		t.Error("nil error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_NonGitHubError(t *testing.T) {
+	err := fmt.Errorf("some generic error")
+	_, isSAML := parseSAMLError(err)
+	if isSAML {
+		t.Error("non-GitHub error should not be identified as SAML error")
+	}
 }
