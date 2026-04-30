@@ -91,7 +91,6 @@ func Save(cfg Config, path string) error {
 // Returns DefaultConfig if the file does not exist.
 func LoadFromPath(path string) (Config, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is user's own config file
-
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			cfg := DefaultConfig()
