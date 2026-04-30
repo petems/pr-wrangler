@@ -280,3 +280,101 @@ func TestWorktreeDir(t *testing.T) {
 		t.Fatalf("path: got %q, want %q", got, want)
 	}
 }
+
+func TestRepoInfoFromPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		setup      func(*mockRunner)
+		wantInfo   RepoInfo
+		wantErr    bool
+		wantErrMsg string
+	}{
+		{
+			name: "main worktree",
+			path: "/home/test/src/myrepo",
+			setup: func(r *mockRunner) {
+				r.set("git -C /home/test/src/myrepo rev-parse --show-toplevel", "/home/test/src/myrepo\n", nil)
+				r.set("git -C /home/test/src/myrepo rev-parse --abbrev-ref HEAD", "main\n", nil)
+				r.set("git -C /home/test/src/myrepo rev-parse --git-common-dir", ".git\n", nil)
+			},
+			wantInfo: RepoInfo{
+				Repo:         "myrepo",
+				Branch:       "main",
+				WorktreePath: "/home/test/src/myrepo",
+			},
+		},
+		{
+			name: "auxiliary worktree",
+			path: "/home/test/src/myrepo-worktrees/feature-xyz",
+			setup: func(r *mockRunner) {
+				r.set("git -C /home/test/src/myrepo-worktrees/feature-xyz rev-parse --show-toplevel",
+					"/home/test/src/myrepo-worktrees/feature-xyz\n", nil)
+				r.set("git -C /home/test/src/myrepo-worktrees/feature-xyz rev-parse --abbrev-ref HEAD",
+					"feature-xyz\n", nil)
+				r.set("git -C /home/test/src/myrepo-worktrees/feature-xyz rev-parse --git-common-dir",
+					"/home/test/src/myrepo/.git\n", nil)
+			},
+			wantInfo: RepoInfo{
+				Repo:         "myrepo",
+				Branch:       "feature-xyz",
+				WorktreePath: "/home/test/src/myrepo-worktrees/feature-xyz",
+			},
+		},
+		{
+			name: "not a git repo",
+			path: "/tmp/not-a-repo",
+			setup: func(r *mockRunner) {
+				r.set("git -C /tmp/not-a-repo rev-parse --show-toplevel", "", fmt.Errorf("fatal: not a git repository"))
+			},
+			wantErr:    true,
+			wantErrMsg: "not a git repo",
+		},
+		{
+			name: "branch lookup fails",
+			path: "/home/test/src/myrepo",
+			setup: func(r *mockRunner) {
+				r.set("git -C /home/test/src/myrepo rev-parse --show-toplevel", "/home/test/src/myrepo\n", nil)
+				r.set("git -C /home/test/src/myrepo rev-parse --abbrev-ref HEAD", "", fmt.Errorf("HEAD missing"))
+			},
+			wantErr:    true,
+			wantErrMsg: "getting branch",
+		},
+		{
+			name: "common dir lookup fails",
+			path: "/home/test/src/myrepo",
+			setup: func(r *mockRunner) {
+				r.set("git -C /home/test/src/myrepo rev-parse --show-toplevel", "/home/test/src/myrepo\n", nil)
+				r.set("git -C /home/test/src/myrepo rev-parse --abbrev-ref HEAD", "main\n", nil)
+				r.set("git -C /home/test/src/myrepo rev-parse --git-common-dir", "", fmt.Errorf("oops"))
+			},
+			wantErr:    true,
+			wantErrMsg: "getting git common dir",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := newMockRunner()
+			tc.setup(runner)
+			mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+			got, err := mgr.RepoInfoFromPath(context.Background(), tc.path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (info=%+v)", got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErrMsg) {
+					t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrMsg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.wantInfo {
+				t.Errorf("got %+v, want %+v", got, tc.wantInfo)
+			}
+		})
+	}
+}
