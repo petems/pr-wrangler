@@ -142,20 +142,41 @@ func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, w
 
 // ensureSessionCmd creates the tmux session/window if needed, then sends
 // sessionReadyMsg so Update() can call switchClientCmd with tea.ExecProcess.
+//
+// On brand-new session creation we seed a `shell` window first (window 0,
+// no command), then add the action window, then explicitly select the
+// action window. This guarantees the user lands on the action window after
+// switch-client AND has a true "session to come back to": closing the
+// agent in the action window leaves them in `shell` at the worktree path.
 func ensureSessionCmd(mgr *tmux.SessionManager, sess tmux.PRSession, windowName, shellCmd string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if !mgr.SessionExists(ctx, sess.SessionName) {
-			if err := mgr.CreateSessionWithWindow(ctx, sess, windowName, shellCmd); err != nil {
+		switch {
+		case !mgr.SessionExists(ctx, sess.SessionName):
+			// Seed `shell` as the initial window (no command), then add
+			// the action window, then explicitly select it so subsequent
+			// switch-client lands deterministically on the action window.
+			if err := mgr.CreateSessionWithWindow(ctx, sess, "shell", ""); err != nil {
 				return sessionErrorMsg{err: fmt.Errorf("creating session %q: %w", sess.SessionName, err)}
 			}
-		} else if !mgr.WindowExists(ctx, sess.SessionName, windowName) {
+			if err := mgr.CreateNamedWindow(ctx, sess.SessionName, windowName, sess.WorkDir, shellCmd); err != nil {
+				return sessionErrorMsg{err: fmt.Errorf("creating window %q: %w", windowName, err)}
+			}
+			if err := mgr.SwitchToWindow(ctx, sess.SessionName, windowName); err != nil {
+				return sessionErrorMsg{err: fmt.Errorf("selecting window %q: %w", windowName, err)}
+			}
+		case !mgr.WindowExists(ctx, sess.SessionName, windowName):
+			// Existing session, missing action window. The newly-created
+			// window becomes active automatically, so switchClientCmd's
+			// session-only target lands on it without an explicit
+			// select-window call.
 			if err := mgr.CreateNamedWindow(ctx, sess.SessionName, windowName, sess.WorkDir, shellCmd); err != nil {
 				return sessionErrorMsg{err: fmt.Errorf("creating window %q: %w", windowName, err)}
 			}
 		}
+		// else: session and window both exist — nothing to do.
 
 		return sessionReadyMsg{sessionName: sess.SessionName, windowName: windowName}
 	}
