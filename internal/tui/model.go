@@ -72,6 +72,8 @@ type Model struct {
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
+	SetColorScheme(cfg.ColorScheme)
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = loadingStyle
@@ -491,7 +493,7 @@ func (m Model) rebuildTable() table.Model {
 	t := table.New(columns).
 		WithRows(tableRows).
 		Focused(true).
-		WithBaseStyle(lipgloss.NewStyle().Foreground(white))
+		WithBaseStyle(lipgloss.NewStyle().Foreground(tableTextColor))
 
 	return t
 }

@@ -46,6 +46,7 @@ Example:
 ```yaml
 repo_base_dir: /Users/you/projects
 service_label_prefix: service:
+color_scheme: dracula
 views:
   - name: My PRs
     query: author:@me
@@ -53,6 +54,17 @@ views:
 agent_commands:
   fix-ci: "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate and fix the issues.'"
 ```
+
+### Color Schemes
+
+Set `color_scheme` to one of the following values (default: `default`):
+
+| Value | Description |
+|---|---|
+| `default` | Classic dark-terminal green/cyan palette |
+| `dracula` | Purple/pink accents inspired by the Dracula theme |
+| `solarized` | Blue/cyan palette inspired by Solarized Dark |
+| `nord` | Blue-gray/frost/aurora palette from the Nord theme |
 
 Session history is stored at `~/.config/pr-wrangler/history.json`.
 
