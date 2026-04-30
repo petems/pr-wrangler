@@ -492,11 +492,18 @@ const (
 	nonTitleColumnsWidth = 82
 	minTitleColumnWidth  = 10
 	// tableChromeLines reserves rows of the terminal for non-table chrome
-	// in View(): cowsay (8), blank, title row, blank, table header, table
-	// footer, trailing newline, help line, plus margin for transient
-	// warning/error/notification lines.
-	tableChromeLines = 15
-	minPageSize      = 5
+	// in View() so the cowsay header stays visible:
+	//   - cowsay block: 8 lines + 1 trailing blank = 9
+	//   - title line + 1 trailing blank          = 2
+	//   - bubble-table internal chrome
+	//     (top border, header row, header
+	//      separator, footer separator,
+	//      page-indicator row, bottom border)    = 6
+	//   - blank line after table + help line     = 2
+	//   - reserve for transient warning/error/
+	//     notification rows                      = 3
+	tableChromeLines = 22
+	minPageSize      = 1
 )
 
 // titleColumnWidth returns the width to allocate to the Title column.
