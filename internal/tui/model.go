@@ -470,10 +470,14 @@ func (m *Model) applyFilters() {
 }
 
 func (m Model) rebuildTable() table.Model {
+	titleWidth := m.width - 80
+	if titleWidth < 0 {
+		titleWidth = 0
+	}
 	columns := []table.Column{
 		table.NewColumn("repo", "Repo", 20),
 		table.NewColumn("pr", "PR", 8),
-		table.NewColumn("title", "Title", m.width-80),
+		table.NewColumn("title", "Title", titleWidth),
 		table.NewColumn("status", "Status", 20),
 		table.NewColumn("action", "Action", 20),
 	}
@@ -482,7 +486,7 @@ func (m Model) rebuildTable() table.Model {
 	for _, r := range m.rows {
 		repoCell := truncate(extractRepoName(r.PR.RepoNameWithOwner), 20)
 		prCell := fmt.Sprintf("#%d", r.PR.Number)
-		titleCell := truncate(r.PR.Title, m.width-80)
+		titleCell := truncate(r.PR.Title, titleWidth)
 		statusCell := r.Status.String()
 
 		// Wrap cells with OSC 8 hyperlinks where we have URLs to point at.

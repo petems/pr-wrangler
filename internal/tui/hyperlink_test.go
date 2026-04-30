@@ -2,19 +2,25 @@ package tui
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 )
+var hyperlinkStateMu sync.Mutex
 
 // withHyperlinks toggles the package-level enable flag for the duration of a
 // test, returning a cleanup function. Necessary because detectHyperlinkSupport
 // is a one-shot probe of the real terminal at init time.
 func withHyperlinks(t *testing.T, enabled bool) func() {
 	t.Helper()
+	hyperlinkStateMu.Lock()
 	prev := hyperlinksEnabled
 	hyperlinksEnabled = enabled
-	return func() { hyperlinksEnabled = prev }
+	return func() {
+		hyperlinksEnabled = prev
+		hyperlinkStateMu.Unlock()
+	}
 }
 
 func TestLink_TTYEnabled_EmitsOSC8(t *testing.T) {
