@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -213,7 +214,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	if m.lastError != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.lastError)))
+		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %s", renderError(m.lastError))))
 		b.WriteString("\n")
 	}
 
@@ -479,11 +480,29 @@ func (m Model) rebuildTable() table.Model {
 
 	var tableRows []table.Row
 	for _, r := range m.rows {
+		repoCell := truncate(extractRepoName(r.PR.RepoNameWithOwner), 20)
+		prCell := fmt.Sprintf("#%d", r.PR.Number)
+		titleCell := truncate(r.PR.Title, m.width-80)
+		statusCell := r.Status.String()
+
+		// Wrap cells with OSC 8 hyperlinks where we have URLs to point at.
+		// Repo cell -> repo root on github.com.
+		// PR# / title -> the PR itself.
+		// Status -> PR's checks tab so Cmd+Click jumps straight to Actions.
+		if owner := r.PR.RepoNameWithOwner; owner != "" {
+			repoCell = Link("https://github.com/"+owner, repoCell)
+		}
+		if r.PR.URL != "" {
+			prCell = Link(r.PR.URL, prCell)
+			titleCell = Link(r.PR.URL, titleCell)
+			statusCell = Link(r.PR.URL+"/checks", statusCell)
+		}
+
 		tableRows = append(tableRows, table.NewRow(table.RowData{
-			"repo":   truncate(extractRepoName(r.PR.RepoNameWithOwner), 20),
-			"pr":     fmt.Sprintf("#%d", r.PR.Number),
-			"title":  truncate(r.PR.Title, m.width-80),
-			"status": r.Status.String(),
+			"repo":   repoCell,
+			"pr":     prCell,
+			"title":  titleCell,
+			"status": statusCell,
 			"action": r.Action.String(),
 		}))
 	}
@@ -729,6 +748,27 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 	cmd = strings.ReplaceAll(cmd, "{{pr_number}}", fmt.Sprintf("%d", r.PR.Number))
 	cmd = strings.ReplaceAll(cmd, "{{repo_nwo}}", r.PR.RepoNameWithOwner)
 	return windowName, tokenPrefix + cmd
+}
+
+// renderError formats an error for the TUI status line. When the error chain
+// contains a *github.SAMLAuthError with an AuthURL, the URL is replaced with
+// an OSC 8 hyperlink so users can Cmd/Ctrl+Click straight to GitHub's SAML
+// authorization page. The underlying error string from SAMLAuthError.Error()
+// is left unchanged for non-TUI callers (logs, tests).
+func renderError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	var samlErr *github.SAMLAuthError
+	if errors.As(err, &samlErr) && samlErr.AuthURL != "" {
+		// Replace the bare URL embedded by SAMLAuthError.Error() with a
+		// hyperlinked version. Keeps surrounding "(authorize at: ...)" text
+		// intact when SAMLAuthError is the leaf, and also handles the case
+		// where the error has been wrapped by fmt.Errorf("%w", ...).
+		msg = strings.ReplaceAll(msg, samlErr.AuthURL, Link(samlErr.AuthURL, samlErr.AuthURL))
+	}
+	return msg
 }
 
 func openBrowser(url string) {

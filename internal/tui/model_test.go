@@ -385,21 +385,58 @@ func TestClaudeWindowAndCmd_CustomPrompt(t *testing.T) {
 }
 
 // stripANSI removes ANSI escape sequences for measuring visible width.
+// Handles both SGR-style CSI sequences (ESC [ ... <letter>) and OSC sequences
+// such as OSC 8 hyperlinks (ESC ] ... ESC \ or BEL terminator). The latter is
+// required so any OSC 8 wrapping introduced by Link() in this package doesn't
+// confuse downstream tests that compare against plain text.
 func stripANSI(s string) string {
+	const (
+		stateText = iota
+		stateEsc  // saw ESC, deciding what's next
+		stateCSI  // inside ESC [ ... <terminator>
+		stateOSC  // inside ESC ] ... ESC \  (or BEL)
+		stateOSCEsc
+	)
+
 	var b strings.Builder
-	inEsc := false
+	state := stateText
 	for _, r := range s {
-		if r == '\033' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEsc = false
+		switch state {
+		case stateText:
+			if r == '\033' {
+				state = stateEsc
+				continue
 			}
-			continue
+			b.WriteRune(r)
+		case stateEsc:
+			switch r {
+			case '[':
+				state = stateCSI
+			case ']':
+				state = stateOSC
+			case '\\':
+				// Lone ST after a malformed sequence; bail out to text.
+				state = stateText
+			default:
+				// ESC <single byte> (e.g. ESC =): consume one byte and resume.
+				state = stateText
+			}
+		case stateCSI:
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				state = stateText
+			}
+		case stateOSC:
+			switch r {
+			case '\007': // BEL terminator
+				state = stateText
+			case '\033':
+				state = stateOSCEsc
+			}
+		case stateOSCEsc:
+			// We just saw ESC inside an OSC: the next rune should be '\' (ST).
+			// Either way, return to text.
+			state = stateText
 		}
-		b.WriteRune(r)
 	}
 	return b.String()
 }
