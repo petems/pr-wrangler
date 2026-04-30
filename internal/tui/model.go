@@ -118,10 +118,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSAMLAuthURL()
 		}
 
+		prevIdx := m.table.GetHighlightedRowIndex()
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
-		highlighted := clampHighlightedIndex(m.table.GetHighlightedRowIndex(), len(m.rows))
-		m.table = m.table.WithRows(m.buildTableRows(highlighted)).WithHighlightedRow(highlighted)
+		if newIdx := m.table.GetHighlightedRowIndex(); newIdx != prevIdx {
+			m.table = m.table.WithRows(m.buildTableRows(newIdx))
+		}
 		return m, cmd
 
 	case tea.WindowSizeMsg:
@@ -516,19 +518,6 @@ func (m Model) tablePageSize() int {
 	return m.height - tableChromeLines
 }
 
-func clampHighlightedIndex(idx, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	if idx < 0 {
-		return 0
-	}
-	if idx >= n {
-		return n - 1
-	}
-	return idx
-}
-
 func (m Model) rebuildTable() table.Model {
 	columns := []table.Column{
 		table.NewColumn("indicator", " ", 2),
@@ -539,7 +528,10 @@ func (m Model) rebuildTable() table.Model {
 		table.NewColumn("action", "Action", 20),
 	}
 
-	highlighted := clampHighlightedIndex(m.table.GetHighlightedRowIndex(), len(m.rows))
+	highlighted := 0
+	if idx := m.table.GetHighlightedRowIndex(); idx >= 0 && idx < len(m.rows) {
+		highlighted = idx
+	}
 
 	return table.New(columns).
 		WithRows(m.buildTableRows(highlighted)).
