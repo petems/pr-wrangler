@@ -72,3 +72,29 @@ Session history is stored at `~/.config/pr-wrangler/history.json`.
 3. Classify the next likely action.
 4. Launch or reuse a tmux session for the selected PR.
 5. Open work in a dedicated repo checkout/worktree when available.
+
+## Features
+
+### SAML-Protected Repository Support
+
+PR Wrangler gracefully handles repositories protected by organizational SAML authentication:
+
+- **Automatic Detection**: When fetching PRs, any that return 403 SAML errors are automatically detected
+- **Visible in TUI**: SAML-protected PRs appear in the list with status "SAML Auth Required" and action "Authorize SAML"
+- **One-Click Authorization**: Press `a` on a selected SAML-protected PR to open the authorization URL in your browser
+- **Graceful Degradation**: Successfully loaded PRs are displayed alongside SAML-protected ones, allowing you to work with accessible PRs while handling authorization separately
+
+**Usage Flow:**
+1. Launch PR Wrangler - SAML-protected PRs will appear with "SAML Auth Required" status
+2. Select a SAML-protected PR and press `a` to authorize
+3. Complete the SAML authentication flow in your browser
+4. Press `r` to refresh - the PR will now load successfully
+
+### Keyboard Shortcuts
+
+- `q` / `ctrl+c`: Quit
+- `r`: Refresh PR list
+- `enter` / `c`: Open or switch to Claude session for selected PR
+- `o`: Open selected PR in browser
+- `a`: Authorize SAML access for selected PR (opens authorization URL)
+- `?`: Toggle help

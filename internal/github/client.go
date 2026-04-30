@@ -3,7 +3,9 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -48,6 +50,71 @@ func (c *GHClient) Token() string {
 // Client returns the underlying go-github client.
 func (c *GHClient) Client() *gh.Client {
 	return c.client
+}
+
+// parseSAMLError checks if an error is a 403 SAML authentication error
+// and extracts the authorization URL if present.
+func parseSAMLError(err error) (*SAMLAuthError, bool) {
+	if err == nil {
+		return nil, false
+	}
+
+	var ghErr *gh.ErrorResponse
+	if !errors.As(err, &ghErr) {
+		return nil, false
+	}
+
+	// Check for 403 status code
+	if ghErr.Response == nil || ghErr.Response.StatusCode != 403 {
+		return nil, false
+	}
+
+	// Treat as SAML if either the X-GitHub-SSO response header is present or
+	// the message body contains the documented SAML phrase. The header is the
+	// authoritative signal per GitHub docs; the message text is a fallback for
+	// older responses or shapes that vary between API surfaces.
+	ssoHeader := ghErr.Response.Header.Get("X-GitHub-SSO")
+	message := ghErr.Message
+	hasSAMLMessage := strings.Contains(message, "Resource protected by organization SAML")
+	if ssoHeader == "" && !hasSAMLMessage {
+		return nil, false
+	}
+
+	samlErr := &SAMLAuthError{
+		Message:       "Resource protected by organization SAML",
+		OriginalError: err,
+	}
+
+	if url := extractSAMLAuthURL(ssoHeader, message); url != "" {
+		samlErr.AuthURL = url
+	}
+
+	return samlErr, true
+}
+
+// samlAuthURLPattern matches GitHub's SAML SSO authorization URL. Both
+// org-level (/orgs/<org>/sso) and enterprise-level (/enterprises/<ent>/sso)
+// shapes are accepted. The token charset is intentionally permissive
+// (alphanumerics plus `._-`) so we don't need to chase token-format changes.
+var samlAuthURLPattern = regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Za-z0-9._-]+`)
+
+// extractSAMLAuthURL pulls the SAML SSO authorization URL out of the
+// X-GitHub-SSO response header (preferred) or the error message body
+// (fallback). The header value is typically `required; url=<URL>` when
+// authorization is required.
+func extractSAMLAuthURL(ssoHeader, message string) string {
+	// Skip "partial-results; organizations=..." which carries no URL.
+	if ssoHeader != "" && !strings.HasPrefix(strings.TrimSpace(ssoHeader), "partial-results") {
+		if match := samlAuthURLPattern.FindString(ssoHeader); match != "" {
+			return match
+		}
+	}
+
+	if match := samlAuthURLPattern.FindString(message); match != "" {
+		return match
+	}
+
+	return ""
 }
 
 // searchResult holds the minimal data from the GitHub Search API
@@ -328,22 +395,32 @@ func prSearchQuery(query string) string {
 	return query
 }
 
+// FetchResult holds the result of fetching PRs. PRs are returned in original
+// search-API (updated-desc) order with SAML positions removed; Errors carries
+// the SAML failures with their original index so the UI can re-interleave them
+// back into the list deterministically.
+type FetchResult struct {
+	PRs    []PR
+	Errors []SAMLErrorEntry
+}
+
 // FetchPRs discovers PRs matching the query and fetches full details for each.
+// Returns both successful PRs and SAML errors for individual PRs that failed.
 // If progress is non-nil it is invoked once with (0, total) after the search
 // phase, then once after each PR detail completes with (done, total).
-func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(done, total int)) ([]PR, error) {
+func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(done, total int)) (FetchResult, error) {
 	query = prSearchQuery(query)
 
 	results, err := c.searchPRs(ctx, query)
 	if err != nil {
-		return nil, err
+		return FetchResult{}, err
 	}
 
 	if len(results) == 0 {
 		if progress != nil {
 			progress(0, 0)
 		}
-		return nil, nil
+		return FetchResult{PRs: []PR{}}, nil
 	}
 
 	total := len(results)
@@ -352,9 +429,11 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 	}
 
 	type indexedPR struct {
-		idx int
-		pr  PR
-		err error
+		idx      int
+		pr       PR
+		err      error
+		samlErr  *SAMLAuthError
+		repoInfo searchResult
 	}
 
 	ch := make(chan indexedPR, total)
@@ -365,7 +444,7 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return FetchResult{}, ctx.Err()
 		}
 
 		wg.Add(1)
@@ -375,17 +454,21 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 
 			owner, repo, err := splitOwnerRepo(sr.RepoNameWithOwner)
 			if err != nil {
-				ch <- indexedPR{idx: idx, err: err}
+				ch <- indexedPR{idx: idx, err: err, repoInfo: sr}
 				return
 			}
 
 			pr, err := c.fetchPRDetail(ctx, owner, repo, sr.Number)
 			if err != nil {
-				ch <- indexedPR{idx: idx, err: err}
+				if samlErr, isSAML := parseSAMLError(err); isSAML {
+					ch <- indexedPR{idx: idx, samlErr: samlErr, repoInfo: sr}
+					return
+				}
+				ch <- indexedPR{idx: idx, err: err, repoInfo: sr}
 				return
 			}
 
-			ch <- indexedPR{idx: idx, pr: pr}
+			ch <- indexedPR{idx: idx, pr: pr, repoInfo: sr}
 		}(i, sr)
 	}
 
@@ -394,20 +477,55 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 		close(ch)
 	}()
 
+	// Place each successful PR at its original index so the returned slice
+	// preserves the search API's updated-desc ordering, regardless of the
+	// completion order of the concurrent detail fetches. SAML errors are
+	// kept in a parallel slice tagged with their original index so the UI
+	// can interleave them back at the right position.
 	prs := make([]PR, total)
+	hasResult := make([]bool, total)
+	samlByIdx := make([]*SAMLErrorEntry, total)
 	done := 0
+
 	for result := range ch {
+		if result.samlErr != nil {
+			samlByIdx[result.idx] = &SAMLErrorEntry{
+				Index:             result.idx,
+				RepoNameWithOwner: result.repoInfo.RepoNameWithOwner,
+				PRNumber:          result.repoInfo.Number,
+				Err:               result.samlErr,
+			}
+			done++
+			if progress != nil {
+				progress(done, total)
+			}
+			continue
+		}
 		if result.err != nil {
-			return nil, result.err
+			return FetchResult{}, result.err
 		}
 		prs[result.idx] = result.pr
+		hasResult[result.idx] = true
 		done++
 		if progress != nil {
 			progress(done, total)
 		}
 	}
 
-	return prs, nil
+	filtered := make([]PR, 0, total)
+	samlEntries := make([]SAMLErrorEntry, 0)
+	for i := range total {
+		if hasResult[i] {
+			filtered = append(filtered, prs[i])
+		} else if samlByIdx[i] != nil {
+			samlEntries = append(samlEntries, *samlByIdx[i])
+		}
+	}
+
+	return FetchResult{
+		PRs:    filtered,
+		Errors: samlEntries,
+	}, nil
 }
 
 // ParsePRViewOutput parses the JSON output of gh pr view --json.

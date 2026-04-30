@@ -1,6 +1,7 @@
 package github
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -97,6 +98,7 @@ const (
 	PRStatusReviewedWithComments PRStatus = "Reviewed (comments)"
 	PRStatusOpen                 PRStatus = "Open"
 	PRStatusHasConflicts         PRStatus = "Has conflicts"
+	PRStatusSAMLRequired         PRStatus = "SAML Auth Required"
 )
 
 type Action string
@@ -110,6 +112,7 @@ const (
 	ActionInvestigate      Action = "Investigate"
 	ActionResolveConflicts Action = "Resolve conflicts"
 	ActionReviewComments   Action = "Review comments"
+	ActionAuthorizeSAML    Action = "Authorize SAML"
 	ActionNone             Action = ""
 )
 
@@ -126,4 +129,32 @@ func IsBotAuthor(author string) bool {
 		}
 	}
 	return strings.HasSuffix(author, "[bot]")
+}
+
+// SAMLAuthError represents a 403 error caused by SAML SSO requirement.
+type SAMLAuthError struct {
+	Message       string
+	AuthURL       string
+	OriginalError error
+}
+
+func (e *SAMLAuthError) Error() string {
+	if e.AuthURL != "" {
+		return fmt.Sprintf("%s (authorize at: %s)", e.Message, e.AuthURL)
+	}
+	return e.Message
+}
+
+func (e *SAMLAuthError) Unwrap() error {
+	return e.OriginalError
+}
+
+// SAMLErrorEntry pairs a SAML auth error with its original search-result
+// position so callers can interleave SAML rows back into the PR list at the
+// correct sequence instead of appending them in non-deterministic order.
+type SAMLErrorEntry struct {
+	Index             int
+	RepoNameWithOwner string
+	PRNumber          int
+	Err               *SAMLAuthError
 }

@@ -32,6 +32,7 @@ type PRRow struct {
 	AgentStatus  string
 	TmuxSession  string
 	WorktreePath string
+	SAMLError    *github.SAMLAuthError
 }
 
 type Model struct {
@@ -64,6 +65,10 @@ type Model struct {
 
 	// Sessions
 	prSessions map[int]tmux.PRSession
+
+	// SAML errors for PRs that couldn't be fetched, ordered by original
+	// search-result position so they can be interleaved with the PR list.
+	samlErrors []github.SAMLErrorEntry
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
@@ -109,6 +114,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchToSession()
 		case "o":
 			return m, m.openSelectedPR()
+		case "a":
+			return m, m.openSAMLAuthURL()
 		}
 
 		var cmd tea.Cmd
@@ -148,7 +155,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.lastError = msg.err
 		} else {
-			m.allRows = buildRows(msg.prs)
+			m.samlErrors = msg.samlErrors
+			m.allRows = buildRows(msg.prs, msg.samlErrors)
 			m.applyFilters()
 			m.table = m.rebuildTable()
 		}
@@ -488,22 +496,66 @@ func (m Model) rebuildTable() table.Model {
 	return t
 }
 
-func buildRows(prs []github.PR) []PRRow {
+// buildRows interleaves successful PRs and SAML-protected placeholders back
+// into a single list in the original search-API ordering. prs is in original
+// order with SAML positions removed; samlErrors carries each SAML failure
+// tagged with its original index. Merged/closed PRs are filtered out.
+func buildRows(prs []github.PR, samlErrors []github.SAMLErrorEntry) []PRRow {
 	var rows []PRRow
-	for _, pr := range prs {
-		if pr.State == github.PRStateMerged || pr.State == github.PRStateClosed {
+	prIdx := 0
+	samlIdx := 0
+	originalPos := 0
+
+	for prIdx < len(prs) || samlIdx < len(samlErrors) {
+		samlMatches := samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos
+		// Consume a SAML entry when its Index lines up, OR when prs is
+		// exhausted but SAML entries remain (only possible if the invariant
+		// from FetchPRs has drifted; treat as defensive fallback).
+		if samlMatches || prIdx >= len(prs) {
+			rows = append(rows, samlPlaceholderRow(samlErrors[samlIdx]))
+			samlIdx++
+			originalPos++
 			continue
 		}
-		status := github.DetermineStatus(pr)
-		action := github.DetermineAction(status)
-		rows = append(rows, PRRow{
-			PR:      pr,
-			Status:  status,
-			Action:  action,
-			RowType: RowTypePR,
-		})
+		// Bounds verified above: the prsExhausted branch above continues, so
+		// reaching this line implies prIdx < len(prs).
+		pr := prs[prIdx] // #nosec G602 -- guarded by prsExhausted check above
+		if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
+			status := github.DetermineStatus(pr)
+			rows = append(rows, PRRow{
+				PR:      pr,
+				Status:  status,
+				Action:  github.DetermineAction(status),
+				RowType: RowTypePR,
+			})
+		}
+		prIdx++
+		originalPos++
 	}
+
 	return rows
+}
+
+// samlPlaceholderRow builds a PRRow for a SAML-protected PR that couldn't be
+// fetched. Action falls back to ActionNone when no authorization URL was
+// extracted, since pressing 'a' would otherwise no-op silently.
+func samlPlaceholderRow(entry github.SAMLErrorEntry) PRRow {
+	action := github.ActionAuthorizeSAML
+	if entry.Err == nil || entry.Err.AuthURL == "" {
+		action = github.ActionNone
+	}
+	return PRRow{
+		PR: github.PR{
+			Number:            entry.PRNumber,
+			Title:             "SAML Authorization Required",
+			RepoNameWithOwner: entry.RepoNameWithOwner,
+			State:             github.PRStateOpen,
+		},
+		Status:    github.PRStatusSAMLRequired,
+		Action:    action,
+		RowType:   RowTypePR,
+		SAMLError: entry.Err,
+	}
 }
 
 func (m *Model) openSelectedPR() tea.Cmd {
@@ -512,8 +564,29 @@ func (m *Model) openSelectedPR() tea.Cmd {
 		return nil
 	}
 	r := m.rows[idx]
+	if r.PR.URL == "" {
+		return nil
+	}
 	return func() tea.Msg {
 		openBrowser(r.PR.URL)
+		return nil
+	}
+}
+
+func (m *Model) openSAMLAuthURL() tea.Cmd {
+	idx := m.table.GetHighlightedRowIndex()
+	if idx < 0 || idx >= len(m.rows) {
+		return nil
+	}
+	r := m.rows[idx]
+
+	// Only open SAML auth URL if this is a SAML-protected PR
+	if r.SAMLError == nil || r.SAMLError.AuthURL == "" {
+		return nil
+	}
+
+	return func() tea.Msg {
+		openBrowser(r.SAMLError.AuthURL)
 		return nil
 	}
 }
@@ -526,6 +599,16 @@ func (m Model) switchToSession() tea.Cmd {
 		}
 	}
 	r := m.rows[idx]
+
+	if r.Status == github.PRStatusSAMLRequired {
+		msg := "authorize SAML for this org outside the app, then refresh"
+		if r.SAMLError != nil && r.SAMLError.AuthURL != "" {
+			msg = "authorize SAML first (press 'a' to open auth URL)"
+		}
+		return func() tea.Msg {
+			return sessionErrorMsg{err: fmt.Errorf("%s", msg)}
+		}
+	}
 
 	repoName := extractRepoName(r.PR.RepoNameWithOwner)
 	repoDir := m.sessionMgr.RepoDir(repoName)
@@ -562,6 +645,7 @@ var helpEntries = []helpEntry{
 	{"r", "r", "refresh", "refresh PRs"},
 	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
 	{"o", "o", "open", "open selected PR in browser"},
+	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
 	{"?", "?", "help", "toggle help"},
 }
 

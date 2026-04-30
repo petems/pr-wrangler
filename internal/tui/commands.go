@@ -17,6 +17,7 @@ import (
 type prsLoadedMsg struct {
 	progressCh <-chan tea.Msg
 	prs        []github.PR
+	samlErrors []github.SAMLErrorEntry
 	err        error
 }
 
@@ -79,10 +80,10 @@ func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			prs, err := ghClient.FetchPRs(ctx, query, func(done, total int) {
+			result, err := ghClient.FetchPRs(ctx, query, func(done, total int) {
 				ch <- prsProgressMsg{progressCh: recv, done: done, total: total}
 			})
-			ch <- prsLoadedMsg{progressCh: recv, prs: prs, err: err}
+			ch <- prsLoadedMsg{progressCh: recv, prs: result.PRs, samlErrors: result.Errors, err: err}
 		}()
 		return prsFetchStartedMsg{progressCh: recv}
 	}

@@ -2,6 +2,8 @@ package github
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -431,4 +433,158 @@ func TestTokenInfo_IsExpired(t *testing.T) {
 			t.Error("future ExpiresAt should not be expired")
 		}
 	})
+}
+
+func TestParseSAMLError_ValidSAMLError(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. Visit https://github.com/enterprises/example-org/sso?authorization_request=EXAMPLEAUTHTOKEN123",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected error to be identified as SAML error")
+	}
+	if samlErr == nil {
+		t.Fatal("expected samlErr to be non-nil")
+	}
+	if samlErr.Message != "Resource protected by organization SAML" {
+		t.Errorf("Message: got %q", samlErr.Message)
+	}
+	if samlErr.AuthURL != "https://github.com/enterprises/example-org/sso?authorization_request=EXAMPLEAUTHTOKEN123" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+	if samlErr.OriginalError != ghErr {
+		t.Error("OriginalError should be set to the original error")
+	}
+}
+
+func TestParseSAMLError_HeaderURL_Required(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "required; url=https://github.com/orgs/example-org/sso?authorization_request=HEADERTOKEN789")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Forbidden",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML when X-GitHub-SSO header is present, even without SAML phrase in body")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=HEADERTOKEN789" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_HeaderTakesPrecedenceOverBody(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "required; url=https://github.com/orgs/example-org/sso?authorization_request=FROMHEADER")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Resource protected by organization SAML enforcement. Visit https://github.com/orgs/example-org/sso?authorization_request=FROMBODY",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=FROMHEADER" {
+		t.Errorf("AuthURL: got %q, want header value", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_HeaderPartialResultsIgnored(t *testing.T) {
+	// partial-results applies to multi-org 200 responses; if it ever leaks
+	// into a 403 we should not interpret it as a URL.
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "partial-results; organizations=21955855,20582480")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Resource protected by organization SAML enforcement. Visit https://github.com/orgs/example-org/sso?authorization_request=FALLBACKTOKEN",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML (message phrase present)")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=FALLBACKTOKEN" {
+		t.Errorf("AuthURL: should fall back to message URL, got %q", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_OrgLevelURL(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization. Visit https://github.com/orgs/example-org/sso?authorization_request=ORGAUTHTOKEN456",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected error to be identified as SAML error")
+	}
+	if samlErr == nil {
+		t.Fatal("expected samlErr to be non-nil")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=ORGAUTHTOKEN456" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_Non403Error(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 404,
+		},
+		Message: "Not found",
+	}
+
+	_, isSAML := parseSAMLError(ghErr)
+	if isSAML {
+		t.Error("404 error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_Non_SAML_403(t *testing.T) {
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+		},
+		Message: "Forbidden for some other reason",
+	}
+
+	_, isSAML := parseSAMLError(ghErr)
+	if isSAML {
+		t.Error("non-SAML 403 error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_NilError(t *testing.T) {
+	_, isSAML := parseSAMLError(nil)
+	if isSAML {
+		t.Error("nil error should not be identified as SAML error")
+	}
+}
+
+func TestParseSAMLError_NonGitHubError(t *testing.T) {
+	err := fmt.Errorf("some generic error")
+	_, isSAML := parseSAMLError(err)
+	if isSAML {
+		t.Error("non-GitHub error should not be identified as SAML error")
+	}
 }
