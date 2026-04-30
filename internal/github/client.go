@@ -69,27 +69,49 @@ func parseSAMLError(err error) (*SAMLAuthError, bool) {
 		return nil, false
 	}
 
-	// Check if the error message contains SAML-related text
+	// Treat as SAML if either the X-GitHub-SSO response header is present or
+	// the message body contains the documented SAML phrase. The header is the
+	// authoritative signal per GitHub docs; the message text is a fallback for
+	// older responses or shapes that vary between API surfaces.
+	ssoHeader := ghErr.Response.Header.Get("X-GitHub-SSO")
 	message := ghErr.Message
-	if !strings.Contains(message, "Resource protected by organization SAML") {
+	hasSAMLMessage := strings.Contains(message, "Resource protected by organization SAML")
+	if ssoHeader == "" && !hasSAMLMessage {
 		return nil, false
 	}
-
-	// Extract the SSO authorization URL using regex.
-	// Org-level SAML uses /orgs/<org>/sso, enterprise-level uses /enterprises/<enterprise>/sso.
-	urlPattern := regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Z0-9]+`)
-	matches := urlPattern.FindStringSubmatch(message)
 
 	samlErr := &SAMLAuthError{
 		Message:       "Resource protected by organization SAML",
 		OriginalError: err,
 	}
 
-	if len(matches) > 0 {
-		samlErr.AuthURL = matches[0]
+	if url := extractSAMLAuthURL(ssoHeader, message); url != "" {
+		samlErr.AuthURL = url
 	}
 
 	return samlErr, true
+}
+
+// extractSAMLAuthURL pulls the SAML SSO authorization URL out of the
+// X-GitHub-SSO response header (preferred) or the error message body
+// (fallback). Org-level SAML uses /orgs/<org>/sso while enterprise-level
+// uses /enterprises/<enterprise>/sso. The header value is typically
+// `required; url=<URL>` when authorization is required.
+func extractSAMLAuthURL(ssoHeader, message string) string {
+	urlPattern := regexp.MustCompile(`https://github\.com/(?:orgs|enterprises)/[^/]+/sso\?authorization_request=[A-Z0-9]+`)
+
+	// Skip "partial-results; organizations=..." which carries no URL.
+	if ssoHeader != "" && !strings.HasPrefix(strings.TrimSpace(ssoHeader), "partial-results") {
+		if match := urlPattern.FindString(ssoHeader); match != "" {
+			return match
+		}
+	}
+
+	if match := urlPattern.FindString(message); match != "" {
+		return match
+	}
+
+	return ""
 }
 
 // searchResult holds the minimal data from the GitHub Search API

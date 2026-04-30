@@ -461,6 +461,71 @@ func TestParseSAMLError_ValidSAMLError(t *testing.T) {
 	}
 }
 
+func TestParseSAMLError_HeaderURL_Required(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "required; url=https://github.com/orgs/example-org/sso?authorization_request=HEADERTOKEN789")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Forbidden",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML when X-GitHub-SSO header is present, even without SAML phrase in body")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=HEADERTOKEN789" {
+		t.Errorf("AuthURL: got %q", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_HeaderTakesPrecedenceOverBody(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "required; url=https://github.com/orgs/example-org/sso?authorization_request=FROMHEADER")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Resource protected by organization SAML enforcement. Visit https://github.com/orgs/example-org/sso?authorization_request=FROMBODY",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=FROMHEADER" {
+		t.Errorf("AuthURL: got %q, want header value", samlErr.AuthURL)
+	}
+}
+
+func TestParseSAMLError_HeaderPartialResultsIgnored(t *testing.T) {
+	// partial-results applies to multi-org 200 responses; if it ever leaks
+	// into a 403 we should not interpret it as a URL.
+	header := http.Header{}
+	header.Set("X-GitHub-SSO", "partial-results; organizations=21955855,20582480")
+
+	ghErr := &gh.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: 403,
+			Header:     header,
+		},
+		Message: "Resource protected by organization SAML enforcement. Visit https://github.com/orgs/example-org/sso?authorization_request=FALLBACKTOKEN",
+	}
+
+	samlErr, isSAML := parseSAMLError(ghErr)
+	if !isSAML {
+		t.Fatal("expected SAML (message phrase present)")
+	}
+	if samlErr.AuthURL != "https://github.com/orgs/example-org/sso?authorization_request=FALLBACKTOKEN" {
+		t.Errorf("AuthURL: should fall back to message URL, got %q", samlErr.AuthURL)
+	}
+}
+
 func TestParseSAMLError_OrgLevelURL(t *testing.T) {
 	ghErr := &gh.ErrorResponse{
 		Response: &http.Response{
