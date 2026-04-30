@@ -120,7 +120,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
-		m.table = m.table.WithRows(m.buildTableRows())
+		highlighted := clampHighlightedIndex(m.table.GetHighlightedRowIndex(), len(m.rows))
+		m.table = m.table.WithRows(m.buildTableRows(highlighted)).WithHighlightedRow(highlighted)
 		return m, cmd
 
 	case tea.WindowSizeMsg:
@@ -515,6 +516,19 @@ func (m Model) tablePageSize() int {
 	return m.height - tableChromeLines
 }
 
+func clampHighlightedIndex(idx, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if idx < 0 {
+		return 0
+	}
+	if idx >= n {
+		return n - 1
+	}
+	return idx
+}
+
 func (m Model) rebuildTable() table.Model {
 	columns := []table.Column{
 		table.NewColumn("indicator", " ", 2),
@@ -525,10 +539,10 @@ func (m Model) rebuildTable() table.Model {
 		table.NewColumn("action", "Action", 20),
 	}
 
-	highlighted := m.table.GetHighlightedRowIndex()
+	highlighted := clampHighlightedIndex(m.table.GetHighlightedRowIndex(), len(m.rows))
 
 	return table.New(columns).
-		WithRows(m.buildTableRows()).
+		WithRows(m.buildTableRows(highlighted)).
 		Focused(true).
 		WithPageSize(m.tablePageSize()).
 		WithBaseStyle(lipgloss.NewStyle().Foreground(white)).
@@ -536,9 +550,8 @@ func (m Model) rebuildTable() table.Model {
 		WithHighlightedRow(highlighted)
 }
 
-func (m Model) buildTableRows() []table.Row {
+func (m Model) buildTableRows(highlighted int) []table.Row {
 	titleWidth := m.titleColumnWidth()
-	highlighted := m.table.GetHighlightedRowIndex()
 
 	tableRows := make([]table.Row, 0, len(m.rows))
 	for i, r := range m.rows {
