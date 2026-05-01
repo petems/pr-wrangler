@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/evertras/bubble-table/table"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 )
@@ -445,4 +446,143 @@ func stripANSI(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// --- rebuildTable highlight clamping tests ---
+
+func TestRebuildTable_ClampToLastRowWhenOverflow(t *testing.T) {
+	// When the highlighted index is out of range (e.g., after filtering reduces
+	// the row count), rebuildTable should clamp to the last row, not jump to 0.
+	m := newTestModel()
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, Title: "PR 2", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 3, Title: "PR 3", State: github.PRStateOpen}},
+	}
+	m.width = 120
+	m.height = 30
+
+	// Build table with last row highlighted
+	m.table = m.rebuildTable()
+	m.table = m.table.WithHighlightedRow(2)
+
+	// Shrink rows
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+	}
+
+	// Rebuild — should clamp to last row (0), not jump to 0 arbitrarily
+	m.table = m.rebuildTable()
+	idx := m.table.GetHighlightedRowIndex()
+	if idx != 0 {
+		t.Errorf("after shrink, highlighted index: got %d, want 0 (last row)", idx)
+	}
+}
+
+func TestRebuildTable_PreservesHighlightWhenInRange(t *testing.T) {
+	// When the highlighted index is still valid, rebuildTable should preserve it.
+	m := newTestModel()
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, Title: "PR 2", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 3, Title: "PR 3", State: github.PRStateOpen}},
+	}
+	m.width = 120
+	m.height = 30
+
+	// Build table with middle row highlighted
+	m.table = m.rebuildTable()
+	m.table = m.table.WithHighlightedRow(1)
+
+	// Rebuild without changing rows
+	m.table = m.rebuildTable()
+	idx := m.table.GetHighlightedRowIndex()
+	if idx != 1 {
+		t.Errorf("highlighted index: got %d, want 1 (preserved)", idx)
+	}
+}
+
+func TestRebuildTable_EmptyRows(t *testing.T) {
+	// When there are no rows, highlighted should be 0.
+	m := newTestModel()
+	m.rows = []PRRow{}
+	m.width = 120
+	m.height = 30
+
+	m.table = m.rebuildTable()
+	idx := m.table.GetHighlightedRowIndex()
+	if idx != 0 {
+		t.Errorf("highlighted index with empty rows: got %d, want 0", idx)
+	}
+}
+
+// --- buildTableRows indicator alignment tests ---
+
+func TestBuildTableRows_IndicatorAlignsWithHighlight(t *testing.T) {
+	// The ">" indicator should appear only in the row matching the highlighted index.
+	m := newTestModel()
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, Title: "PR 2", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 3, Title: "PR 3", State: github.PRStateOpen}},
+	}
+	m.width = 120
+
+	rows := m.buildTableRows(1)
+	if len(rows) != 3 {
+		t.Fatalf("buildTableRows: got %d rows, want 3", len(rows))
+	}
+
+	// Check indicator column
+	for i, row := range rows {
+		indicatorCell := row.Data["indicator"].(table.StyledCell)
+		indicator := indicatorCell.Data.(string)
+		if i == 1 {
+			if indicator != ">" {
+				t.Errorf("row %d: indicator = %q, want %q", i, indicator, ">")
+			}
+		} else {
+			if indicator != " " {
+				t.Errorf("row %d: indicator = %q, want %q", i, indicator, " ")
+			}
+		}
+	}
+}
+
+func TestBuildTableRows_IndicatorAtFirstRow(t *testing.T) {
+	m := newTestModel()
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, Title: "PR 2", State: github.PRStateOpen}},
+	}
+	m.width = 120
+
+	rows := m.buildTableRows(0)
+	indicator0 := rows[0].Data["indicator"].(table.StyledCell).Data.(string)
+	indicator1 := rows[1].Data["indicator"].(table.StyledCell).Data.(string)
+	if indicator0 != ">" {
+		t.Errorf("first row indicator: got %q, want %q", indicator0, ">")
+	}
+	if indicator1 != " " {
+		t.Errorf("second row indicator: got %q, want %q", indicator1, " ")
+	}
+}
+
+func TestBuildTableRows_IndicatorAtLastRow(t *testing.T) {
+	m := newTestModel()
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "PR 1", State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, Title: "PR 2", State: github.PRStateOpen}},
+	}
+	m.width = 120
+
+	rows := m.buildTableRows(1)
+	indicator0 := rows[0].Data["indicator"].(table.StyledCell).Data.(string)
+	indicator1 := rows[1].Data["indicator"].(table.StyledCell).Data.(string)
+	if indicator0 != " " {
+		t.Errorf("first row indicator: got %q, want %q", indicator0, " ")
+	}
+	if indicator1 != ">" {
+		t.Errorf("last row indicator: got %q, want %q", indicator1, ">")
+	}
 }

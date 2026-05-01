@@ -536,8 +536,13 @@ func (m Model) rebuildTable() table.Model {
 	}
 
 	highlighted := 0
-	if idx := m.table.GetHighlightedRowIndex(); idx >= 0 && idx < len(m.rows) {
-		highlighted = idx
+	if idx := m.table.GetHighlightedRowIndex(); idx >= 0 {
+		if idx < len(m.rows) {
+			highlighted = idx
+		} else if len(m.rows) > 0 {
+			// Clamp to last row instead of jumping to first
+			highlighted = len(m.rows) - 1
+		}
 	}
 
 	return table.New(columns).
