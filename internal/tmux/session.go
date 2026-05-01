@@ -82,6 +82,9 @@ func SanitizeSessionName(title string, number int) string {
 		s = s[:30]
 	}
 	s = strings.TrimRight(s, "-")
+	if s == "" {
+		s = "pr"
+	}
 
 	if number > 0 {
 		return fmt.Sprintf("%s-%d", s, number)
@@ -168,7 +171,11 @@ func (m *SessionManager) ListTmuxSessions(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, nil
 	}
-	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return []string{}, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
 }
 
 // SessionExists checks whether a tmux session with the given name exists.
