@@ -130,7 +130,7 @@ func TestBuildRows_SAMLWithoutAuthURL_ActionNone(t *testing.T) {
 // --- renderCowsay tests ---
 
 func TestRenderCowsay_ContainsCowArt(t *testing.T) {
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	for _, expected := range []string{
 		"Mooo! Fetching PR's for ya pardner, Yee-haw!",
 		`^__^`,
@@ -145,7 +145,7 @@ func TestRenderCowsay_ContainsCowArt(t *testing.T) {
 }
 
 func TestRenderCowsay_ContainsTitle(t *testing.T) {
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	// The title contains "PR WRANGLER" in block letters; check for distinctive fragments
 	if !strings.Contains(out, "\u2597\u2584\u2584\u2596") {
 		t.Error("output missing title banner")
@@ -153,7 +153,7 @@ func TestRenderCowsay_ContainsTitle(t *testing.T) {
 }
 
 func TestRenderCowsay_TitleHasNoBlankLineGaps(t *testing.T) {
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	lines := strings.Split(out, "\n")
 
 	// Find the title section: consecutive non-empty lines containing block chars
@@ -184,7 +184,7 @@ func TestRenderCowsay_TitleHasNoBlankLineGaps(t *testing.T) {
 }
 
 func TestRenderCowsay_TitleLinesHaveUniformPrefix(t *testing.T) {
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	lines := strings.Split(out, "\n")
 
 	// Collect title lines (those with block characters)
@@ -210,14 +210,14 @@ func TestRenderCowsay_TitleLinesHaveUniformPrefix(t *testing.T) {
 }
 
 func TestRenderCowsay_ContainsSpinner(t *testing.T) {
-	out := renderCowsay("XYZ", 120, 30)
+	out := renderCowsay(NewStyles("default"), "XYZ", 120, 30)
 	if !strings.Contains(out, "XYZ") {
 		t.Error("spinner string not found in output")
 	}
 }
 
 func TestRenderCowsay_CowLinesHaveUniformPrefix(t *testing.T) {
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	lines := strings.Split(out, "\n")
 
 	// Find the cow section by looking for the speech bubble
@@ -245,7 +245,7 @@ func TestRenderCowsay_CowLinesHaveUniformPrefix(t *testing.T) {
 }
 
 func TestRenderCowsay_CenteredVertically(t *testing.T) {
-	out := renderCowsay("*", 120, 40)
+	out := renderCowsay(NewStyles("default"), "*", 120, 40)
 	lines := strings.Split(out, "\n")
 
 	// Count leading empty lines
@@ -269,7 +269,7 @@ func TestRenderCowsay_CenteredVertically(t *testing.T) {
 func TestRenderCowsay_TitleCenteredIndependently(t *testing.T) {
 	// Title lines should each be centered based on their own width,
 	// not the cow block width
-	out := renderCowsay("*", 120, 30)
+	out := renderCowsay(NewStyles("default"), "*", 120, 30)
 	lines := strings.Split(out, "\n")
 
 	for _, l := range lines {
@@ -291,7 +291,7 @@ func TestRenderCowsay_TitleCenteredIndependently(t *testing.T) {
 
 func TestRenderCowsay_SmallTerminalNoPanic(t *testing.T) {
 	// Should not panic or produce negative padding
-	out := renderCowsay("*", 10, 5)
+	out := renderCowsay(NewStyles("default"), "*", 10, 5)
 	if len(out) == 0 {
 		t.Error("expected non-empty output")
 	}

@@ -41,6 +41,8 @@ type Model struct {
 	sessionStore *session.Store
 	config       config.Config
 
+	styles Styles
+
 	width  int
 	height int
 
@@ -72,17 +74,18 @@ type Model struct {
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
-	SetColorScheme(cfg.ColorScheme)
+	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = loadingStyle
+	s.Style = styles.Loading
 
 	m := Model{
 		ghClient:     ghClient,
 		sessionMgr:   sessionMgr,
 		sessionStore: sessionStore,
 		config:       cfg,
+		styles:       styles,
 		loading:      true,
 		spinner:      s,
 		prSessions:   make(map[int]tmux.PRSession),
@@ -217,13 +220,13 @@ func (m Model) View() string {
 
 	var b strings.Builder
 	b.WriteString(cowsayDashboard + "\n\n")
-	b.WriteString(titleStyle.Render("PR Wrangler"))
+	b.WriteString(m.styles.Title.Render("PR Wrangler"))
 	if q := m.configuredQuery(); q != "" {
-		b.WriteString(helpStyle.Render(fmt.Sprintf("  [query: %s]", q)))
+		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
 	b.WriteString("\n\n")
 	if w := queryWarning(m.configuredQuery()); w != "" {
-		b.WriteString(warningStyle.Render(w))
+		b.WriteString(m.styles.Warning.Render(w))
 		b.WriteString("\n")
 	}
 
@@ -231,12 +234,12 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	if m.lastError != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.lastError)))
+		b.WriteString(m.styles.Error.Render(fmt.Sprintf("Error: %v", m.lastError)))
 		b.WriteString("\n")
 	}
 
 	if m.notification != "" {
-		b.WriteString(helpStyle.Render(m.notification))
+		b.WriteString(m.styles.Help.Render(m.notification))
 		b.WriteString("\n")
 	}
 
@@ -270,7 +273,7 @@ const cowsayLoading = "" +
 
 // renderCowsay builds the centered loading screen with the title banner
 // and cowsay for the given dimensions.
-func renderCowsay(spinnerStr string, width, height int) string {
+func renderCowsay(styles Styles, spinnerStr string, width, height int) string {
 	titleLines := strings.Split(loadingTitle, "\n")
 	cow := fmt.Sprintf(cowsayLoading, spinnerStr, spinnerStr)
 	cowLines := strings.Split(cow, "\n")
@@ -321,7 +324,7 @@ func renderCowsay(spinnerStr string, width, height int) string {
 
 	for _, line := range titleLines {
 		b.WriteString(titlePrefix)
-		b.WriteString(bannerStyle.Render(line))
+		b.WriteString(styles.Banner.Render(line))
 		b.WriteByte('\n')
 	}
 
@@ -342,7 +345,7 @@ func renderCowsay(spinnerStr string, width, height int) string {
 
 	for _, line := range cowLines {
 		b.WriteString(cowPrefix)
-		b.WriteString(loadingStyle.Render(line))
+		b.WriteString(styles.Loading.Render(line))
 		b.WriteByte('\n')
 	}
 
@@ -360,7 +363,7 @@ func (m Model) renderLoadingScreen() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(renderCowsay(m.spinner.View(), width, height))
+	b.WriteString(renderCowsay(m.styles, m.spinner.View(), width, height))
 
 	// Centered status/query/warning under the cow — only while a fetch is
 	// in flight.
@@ -372,14 +375,14 @@ func (m Model) renderLoadingScreen() string {
 			status = renderProgressBar(m.progressDone, m.progressTotal, progressBarWidth(width))
 		}
 		b.WriteString("\n")
-		b.WriteString(centerLine(loadingStyle.Render(status), width))
+		b.WriteString(centerLine(m.styles.Loading.Render(status), width))
 		b.WriteString("\n")
 		if q := github.EffectiveQuery(m.configuredQuery()); q != "" {
-			b.WriteString(centerLine(helpStyle.Render(fmt.Sprintf("query: %s", q)), width))
+			b.WriteString(centerLine(m.styles.Help.Render(fmt.Sprintf("query: %s", q)), width))
 			b.WriteString("\n")
 		}
 		if w := queryWarning(m.configuredQuery()); w != "" {
-			b.WriteString(centerLine(warningStyle.Render(w), width))
+			b.WriteString(centerLine(m.styles.Warning.Render(w), width))
 			b.WriteString("\n")
 		}
 	}
@@ -393,7 +396,7 @@ func (m Model) renderLoadingScreen() string {
 			pad = 0
 		}
 		b.WriteString(strings.Repeat("\n", pad))
-		b.WriteString(helpStyle.Render(src))
+		b.WriteString(m.styles.Help.Render(src))
 	}
 
 	return b.String()
@@ -546,8 +549,8 @@ func (m Model) rebuildTable() table.Model {
 		WithRows(m.buildTableRows(highlighted)).
 		Focused(true).
 		WithPageSize(m.tablePageSize()).
-		WithBaseStyle(lipgloss.NewStyle().Foreground(tableTextColor)).
-		HighlightStyle(selectedRowStyle).
+		WithBaseStyle(lipgloss.NewStyle().Foreground(m.styles.TableText)).
+		HighlightStyle(m.styles.SelectedRow).
 		WithHighlightedRow(highlighted)
 }
 
@@ -561,7 +564,7 @@ func (m Model) buildTableRows(highlighted int) []table.Row {
 			indicator = ">"
 		}
 		tableRows = append(tableRows, table.NewRow(table.RowData{
-			"indicator": table.NewStyledCell(indicator, indicatorStyle),
+			"indicator": table.NewStyledCell(indicator, m.styles.Indicator),
 			"repo":      truncate(extractRepoName(r.PR.RepoNameWithOwner), 20),
 			"pr":        fmt.Sprintf("#%d", r.PR.Number),
 			"title":     truncate(r.PR.Title, titleWidth),
@@ -730,7 +733,7 @@ func (m Model) buildHelpLine() string {
 	for i, e := range helpEntries {
 		parts[i] = fmt.Sprintf("%s: %s", e.shortKey, e.shortDesc)
 	}
-	return helpStyle.Render(strings.Join(parts, " | "))
+	return m.styles.Help.Render(strings.Join(parts, " | "))
 }
 
 func (m Model) renderHelp() string {
@@ -741,10 +744,10 @@ func (m Model) renderHelp() string {
 		}
 	}
 	lines := make([]string, 0, len(helpEntries)+1)
-	lines = append(lines, helpCategoryStyle.Render("Keyboard"))
+	lines = append(lines, m.styles.HelpCategory.Render("Keyboard"))
 	for _, e := range helpEntries {
 		padding := strings.Repeat(" ", keyWidth-lipgloss.Width(e.longKey)+2)
-		lines = append(lines, helpStyle.Render(e.longKey+padding+e.longDesc))
+		lines = append(lines, m.styles.Help.Render(e.longKey+padding+e.longDesc))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
