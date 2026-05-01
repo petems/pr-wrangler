@@ -164,6 +164,13 @@ func TestCreateNamedWindow(t *testing.T) {
 	}
 }
 
+func TestSanitizeSessionName_EmptyTitleUsesFallback(t *testing.T) {
+	got := SanitizeSessionName("!!!", 123)
+	if got != "pr-123" {
+		t.Fatalf("got %q, want %q", got, "pr-123")
+	}
+}
+
 func TestSwitchToSession_InsideTmux(t *testing.T) {
 	runner := newMockRunner()
 	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
@@ -208,6 +215,20 @@ func TestSwitchToSession_Error(t *testing.T) {
 	err := mgr.SwitchToSession(context.Background(), "bad-sess")
 	if err == nil {
 		t.Error("expected error from SwitchToSession")
+	}
+}
+
+func TestListTmuxSessions_EmptyOutput(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux list-sessions -F #{session_name}", "", nil)
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sessions, err := mgr.ListTmuxSessions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("got %v, want empty list", sessions)
 	}
 }
 
