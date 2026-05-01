@@ -119,8 +119,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSAMLAuthURL()
 		}
 
+		prevIdx := m.table.GetHighlightedRowIndex()
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
+		if newIdx := m.table.GetHighlightedRowIndex(); newIdx != prevIdx {
+			m.table = m.table.WithRows(m.buildTableRows(newIdx))
+		}
 		return m, cmd
 
 	case tea.WindowSizeMsg:
@@ -194,17 +198,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// cowsayDashboard is the static cowsay shown in the main dashboard view.
+const cowsayDashboard = "" +
+	" _______________________________________\n" +
+	"< Mooo! Welcome to PR Wrangler, pardner >\n" +
+	" ---------------------------------------\n" +
+	"        \\   ^__^\n" +
+	"         \\  (oo)\\_______\n" +
+	"            (__)\\       )\\/\\\n" +
+	"                ||----w |\n" +
+	"                ||     ||"
+
 func (m Model) View() string {
 	if m.loading && len(m.allRows) == 0 {
 		return m.renderLoadingScreen()
 	}
 
 	var b strings.Builder
+	b.WriteString(cowsayDashboard + "\n\n")
 	b.WriteString(titleStyle.Render("PR Wrangler"))
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(helpStyle.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	if w := queryWarning(m.configuredQuery()); w != "" {
 		b.WriteString(warningStyle.Render(w))
 		b.WriteString("\n")
@@ -469,21 +485,80 @@ func (m *Model) applyFilters() {
 	// TODO: implement filtering
 }
 
-func (m Model) rebuildTable() table.Model {
-	titleWidth := m.width - 80
-	if titleWidth < 0 {
-		titleWidth = 0
+// Layout constants for the table view.
+const (
+	// nonTitleColumnsWidth reserves columns/padding around the Title column:
+	// indicator (2) + repo (20) + pr (8) + status (20) + action (20) plus
+	// per-column padding/borders.
+	nonTitleColumnsWidth = 82
+	minTitleColumnWidth  = 10
+	// tableChromeLines reserves rows of the terminal for non-table chrome
+	// in View() so the cowsay header stays visible:
+	//   - cowsay block: 8 lines + 1 trailing blank = 9
+	//   - title line + 1 trailing blank          = 2
+	//   - bubble-table internal chrome
+	//     (top border, header row, header
+	//      separator, footer separator,
+	//      page-indicator row, bottom border)    = 6
+	//   - blank line after table + help line     = 2
+	//   - reserve for transient warning/error/
+	//     notification rows                      = 3
+	tableChromeLines = 22
+	minPageSize      = 1
+)
+
+// titleColumnWidth returns the width to allocate to the Title column.
+func (m Model) titleColumnWidth() int {
+	w := m.width - nonTitleColumnsWidth
+	if w < minTitleColumnWidth {
+		return minTitleColumnWidth
 	}
+	return w
+}
+
+// tablePageSize returns the table page size based on the available
+// terminal height, leaving room for title, table header/footer, and the
+// help line.
+func (m Model) tablePageSize() int {
+	if m.height <= tableChromeLines+minPageSize {
+		return minPageSize
+	}
+	return m.height - tableChromeLines
+}
+
+func (m Model) rebuildTable() table.Model {
 	columns := []table.Column{
+		table.NewColumn("indicator", " ", 2),
 		table.NewColumn("repo", "Repo", 20),
 		table.NewColumn("pr", "PR", 8),
-		table.NewColumn("title", "Title", titleWidth),
+		table.NewColumn("title", "Title", m.titleColumnWidth()),
 		table.NewColumn("status", "Status", 20),
 		table.NewColumn("action", "Action", 20),
 	}
 
-	var tableRows []table.Row
-	for _, r := range m.rows {
+	highlighted := 0
+	if idx := m.table.GetHighlightedRowIndex(); idx >= 0 && idx < len(m.rows) {
+		highlighted = idx
+	}
+
+	return table.New(columns).
+		WithRows(m.buildTableRows(highlighted)).
+		Focused(true).
+		WithPageSize(m.tablePageSize()).
+		WithBaseStyle(lipgloss.NewStyle().Foreground(white)).
+		HighlightStyle(selectedRowStyle).
+		WithHighlightedRow(highlighted)
+}
+
+func (m Model) buildTableRows(highlighted int) []table.Row {
+	titleWidth := m.titleColumnWidth()
+
+	tableRows := make([]table.Row, 0, len(m.rows))
+	for i, r := range m.rows {
+		indicator := " "
+		if i == highlighted {
+			indicator = ">"
+		}
 		repoCell := truncate(extractRepoName(r.PR.RepoNameWithOwner), 20)
 		prCell := fmt.Sprintf("#%d", r.PR.Number)
 		titleCell := truncate(r.PR.Title, titleWidth)
@@ -503,20 +578,15 @@ func (m Model) rebuildTable() table.Model {
 		}
 
 		tableRows = append(tableRows, table.NewRow(table.RowData{
-			"repo":   repoCell,
-			"pr":     prCell,
-			"title":  titleCell,
-			"status": statusCell,
-			"action": r.Action.String(),
+			"indicator": table.NewStyledCell(indicator, indicatorStyle),
+			"repo":      repoCell,
+			"pr":        prCell,
+			"title":     titleCell,
+			"status":    statusCell,
+			"action":    r.Action.String(),
 		}))
 	}
-
-	t := table.New(columns).
-		WithRows(tableRows).
-		Focused(true).
-		WithBaseStyle(lipgloss.NewStyle().Foreground(white))
-
-	return t
+	return tableRows
 }
 
 // buildRows interleaves successful PRs and SAML-protected placeholders back

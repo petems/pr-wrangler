@@ -384,6 +384,49 @@ func TestClaudeWindowAndCmd_CustomPrompt(t *testing.T) {
 	}
 }
 
+// --- titleColumnWidth / tablePageSize ---
+
+func TestTitleColumnWidth(t *testing.T) {
+	cases := []struct {
+		name  string
+		width int
+		want  int
+	}{
+		{"zero falls back to minimum", 0, minTitleColumnWidth},
+		{"clamped at minimum when narrow", 80, minTitleColumnWidth},
+		{"scales with width", 200, 200 - nonTitleColumnsWidth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{width: tc.width}
+			if got := m.titleColumnWidth(); got != tc.want {
+				t.Errorf("titleColumnWidth(width=%d) = %d, want %d", tc.width, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTablePageSize(t *testing.T) {
+	cases := []struct {
+		name   string
+		height int
+		want   int
+	}{
+		{"zero falls back to minimum", 0, minPageSize},
+		{"short terminal falls back to minimum", tableChromeLines + minPageSize, minPageSize},
+		{"normal terminal scales with height", 30, 30 - tableChromeLines},
+		{"tall terminal scales with height", 60, 60 - tableChromeLines},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{height: tc.height}
+			if got := m.tablePageSize(); got != tc.want {
+				t.Errorf("tablePageSize(height=%d) = %d, want %d", tc.height, got, tc.want)
+			}
+		})
+	}
+}
+
 // stripANSI removes ANSI escape sequences for measuring visible width.
 // Handles both SGR-style CSI sequences (ESC [ ... <letter>) and OSC sequences
 // such as OSC 8 hyperlinks (ESC ] ... ESC \ or BEL terminator). The latter is
