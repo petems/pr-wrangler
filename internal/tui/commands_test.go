@@ -73,7 +73,7 @@ func TestEnsureSessionCmd(t *testing.T) {
 			},
 		},
 		{
-			name: "existing session, missing action window adds window only",
+			name: "existing session, missing action window adds window then selects it",
 			setup: func(r *fakeRunner) {
 				// has-session succeeds (default nil error)
 				r.set(
@@ -86,10 +86,11 @@ func TestEnsureSessionCmd(t *testing.T) {
 				{"tmux", "has-session", "-t", sessionName},
 				{"tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}"},
 				{"tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir, shellCmd},
+				{"tmux", "select-window", "-t", sessionName + ":" + windowName},
 			},
 		},
 		{
-			name: "existing session and window does nothing mutating",
+			name: "existing session and window selects action window",
 			setup: func(r *fakeRunner) {
 				r.set(
 					"tmux list-windows -t "+sessionName+" -F #{window_name}",
@@ -100,6 +101,7 @@ func TestEnsureSessionCmd(t *testing.T) {
 			wantCalls: [][]string{
 				{"tmux", "has-session", "-t", sessionName},
 				{"tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}"},
+				{"tmux", "select-window", "-t", sessionName + ":" + windowName},
 			},
 		},
 	}
