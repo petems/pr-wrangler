@@ -801,7 +801,7 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 		return "claude", fmt.Sprintf("claude --permission-mode acceptEdits '%s'", customPrompt)
 	}
 
-	cmdTemplate := ""
+	cmdTemplate := m.config.AgentCommands["followup"]
 	windowName := "claude"
 
 	switch r.Action {

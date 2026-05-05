@@ -441,16 +441,17 @@ func TestClaudeWindowAndCmd_ResolveConflicts(t *testing.T) {
 
 func TestClaudeWindowAndCmd_Default(t *testing.T) {
 	m := newTestModel()
+	m.config.AgentCommands["followup"] = "custom followup {{pr_url}} {{pr_number}} {{repo_nwo}}"
 	r := &PRRow{
-		PR:     github.PR{URL: "https://github.com/org/repo/pull/4"},
+		PR:     github.PR{URL: "https://github.com/org/repo/pull/4", Number: 4, RepoNameWithOwner: "org/repo"},
 		Action: github.ActionMerge,
 	}
 	window, cmd := m.claudeWindowAndCmd(r, "")
 	if window != "claude" {
 		t.Errorf("window: got %q, want %q", window, "claude")
 	}
-	if !strings.Contains(cmd, "Continue working") {
-		t.Errorf("cmd should contain 'Continue working': %s", cmd)
+	if !strings.Contains(cmd, "custom followup https://github.com/org/repo/pull/4 4 org/repo") {
+		t.Errorf("cmd should contain configured followup command with replacements: %s", cmd)
 	}
 }
 
