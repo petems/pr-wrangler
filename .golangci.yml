@@ -15,7 +15,7 @@ linters:
     errcheck:
       check-type-assertions: true
     misspell:
-      locale: US
+      locale: UK
     revive:
       rules:
         - name: var-naming
