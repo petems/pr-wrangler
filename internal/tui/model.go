@@ -38,7 +38,7 @@ type PRRow struct {
 }
 
 type Model struct {
-	ghClient     *github.GHClient
+	ghClient     github.PRFetcher
 	cachedClient *github.CachedClient
 	sessionMgr   *tmux.SessionManager
 	sessionStore *session.Store
@@ -76,7 +76,7 @@ type Model struct {
 	samlErrors []github.SAMLErrorEntry
 }
 
-func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
+func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
 	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
@@ -236,6 +236,10 @@ func (m Model) View() string {
 
 	b.WriteString(m.table.View())
 	b.WriteString("\n")
+	if len(m.rows) == 0 {
+		b.WriteString(m.styles.Help.Render("No PRs match the current query."))
+		b.WriteString("\n")
+	}
 
 	if m.lastError != nil {
 		b.WriteString(m.styles.Error.Render(fmt.Sprintf("Error: %s", renderError(m.lastError))))
@@ -821,8 +825,8 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 
 	// Prefix with GITHUB_TOKEN so the JS CLI (and any subprocess) uses our managed token
 	tokenPrefix := ""
-	if m.ghClient.Token() != "" {
-		escapedToken := strings.ReplaceAll(m.ghClient.Token(), "'", "'\"'\"'")
+	if tokenClient, ok := m.ghClient.(interface{ Token() string }); ok && tokenClient.Token() != "" {
+		escapedToken := strings.ReplaceAll(tokenClient.Token(), "'", "'\"'\"'")
 		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", escapedToken)
 	}
 
