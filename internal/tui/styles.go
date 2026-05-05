@@ -59,10 +59,10 @@ var colorSchemes = map[string]ColorScheme{
 	},
 }
 
-// ColorSchemeNames returns the available scheme names in a stable order.
-func ColorSchemeNames() []string {
-	return []string{"default", "dracula", "solarized", "nord"}
-}
+// ThemeNames lists the available colour schemes in display order. This is
+// the source of truth for the theme picker UI; colorSchemes must contain an
+// entry for every name listed here.
+var ThemeNames = []string{"default", "dracula", "solarized", "nord"}
 
 // Styles holds the rendered lipgloss styles for a single Model instance.
 // Each Model owns its own Styles, so multiple TUI instances can run in the
