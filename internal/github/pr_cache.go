@@ -48,21 +48,17 @@ func (c *prCache) set(key cacheKey, value FetchResult) {
 	c.mu.Unlock()
 }
 
-type fetcher interface {
-	FetchPRs(ctx context.Context, query string, progress func(done, total int)) (FetchResult, error)
-}
-
 // CachedClient wraps a PR fetcher and caches results by query for a short TTL.
 // When a cached result exists, FetchPRsCached returns it immediately and (if
 // refresh is true) starts a background refresh which updates the cache when
 // complete.
 type CachedClient struct {
-	fetcher fetcher
+	fetcher PRFetcher
 	cache   *prCache
 	ttl     time.Duration
 }
 
-func NewCachedClient(fetcher fetcher, ttl time.Duration) *CachedClient {
+func NewCachedClient(fetcher PRFetcher, ttl time.Duration) *CachedClient {
 	return &CachedClient{fetcher: fetcher, cache: newPRCache(), ttl: ttl}
 }
 

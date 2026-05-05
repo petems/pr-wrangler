@@ -35,6 +35,15 @@ run: build
 test:
 	$(GO) test $(GOFLAGS) ./...
 
+## test-acceptance: Run TUI acceptance tests with mock GitHub and tmux dependencies
+.PHONY: test-acceptance
+test-acceptance:
+	$(GO) test $(GOFLAGS) -tags acceptance ./internal/tui
+
+## test-all: Run unit and acceptance tests
+.PHONY: test-all
+test-all: test test-acceptance
+
 ## test-verbose: Run all tests with verbose output
 .PHONY: test-verbose
 test-verbose:
