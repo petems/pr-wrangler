@@ -19,8 +19,8 @@ func sendKey(t *testing.T, m Model, key tea.KeyPressMsg) Model {
 	return next
 }
 
-func keyPress(text string) tea.KeyPressMsg {
-	return tea.KeyPressMsg(tea.Key{Text: text, Code: []rune(text)[0]})
+func themePickerKeyPress() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Text: "t", Code: 't'})
 }
 
 func specialKeyPress(code rune) tea.KeyPressMsg {
@@ -32,7 +32,7 @@ func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 	cfg.ColorScheme = "solarized"
 	m := NewModel(nil, nil, nil, cfg)
 
-	m = sendKey(t, m, keyPress("t"))
+	m = sendKey(t, m, themePickerKeyPress())
 
 	if !m.showThemePicker {
 		t.Fatal("expected picker to be open")
@@ -44,7 +44,7 @@ func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 
 func TestThemePicker_DownClampsAtEnd(t *testing.T) {
 	m := NewModel(nil, nil, nil, config.DefaultConfig())
-	m = sendKey(t, m, keyPress("t"))
+	m = sendKey(t, m, themePickerKeyPress())
 
 	for i := 0; i < len(ThemeNames)+3; i++ {
 		m = sendKey(t, m, specialKeyPress(tea.KeyDown))
@@ -65,7 +65,7 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 	m := NewModel(nil, nil, nil, config.DefaultConfig())
 	oldText := m.styles.TableText
 
-	m = sendKey(t, m, keyPress("t"))
+	m = sendKey(t, m, themePickerKeyPress())
 	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
 	m = sendKey(t, m, specialKeyPress(tea.KeyEnter))
 
@@ -85,7 +85,7 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	originalScheme := m.config.ColorScheme
 	originalText := m.styles.TableText
 
-	m = sendKey(t, m, keyPress("t"))
+	m = sendKey(t, m, themePickerKeyPress())
 	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
 	m = sendKey(t, m, specialKeyPress(tea.KeyEsc))
 
@@ -97,6 +97,36 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	}
 	if m.styles.TableText != originalText {
 		t.Error("styles should not change on cancel")
+	}
+}
+
+func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
+	m := Model{}
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyPgDown))
+
+	if m.selected != 0 {
+		t.Errorf("selected after pgdown with no rows: got %d, want 0", m.selected)
+	}
+}
+
+func TestSelection_LoadedRowsClampNegativeSelection(t *testing.T) {
+	progressCh := make(chan tea.Msg)
+	m := Model{selected: -1, progressCh: progressCh}
+
+	updated, _ := m.Update(prsLoadedMsg{
+		progressCh: progressCh,
+		prs: []github.PR{
+			{Number: 1, Title: "Open PR", State: github.PRStateOpen},
+		},
+	})
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.selected != 0 {
+		t.Errorf("selected after loading rows: got %d, want 0", next.selected)
 	}
 }
 
@@ -301,6 +331,17 @@ func TestRenderTable_HyperlinksPresent(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered table missing hyperlink URL %q", want)
 		}
+	}
+}
+
+func TestRenderTable_HyperlinksDisabled(t *testing.T) {
+	defer withHyperlinks(t, false)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	if strings.Contains(rendered, "\x1b]8;;") {
+		t.Errorf("rendered table emitted OSC 8 hyperlink escapes while disabled: %q", rendered)
 	}
 }
 
@@ -543,6 +584,22 @@ func TestClaudeWindowAndCmd_Default(t *testing.T) {
 		t.Errorf("window: got %q, want %q", window, "claude")
 	}
 	if !strings.Contains(cmd, "custom followup https://github.com/org/repo/pull/4 4 org/repo") {
+		t.Errorf("cmd should contain configured followup command with replacements: %s", cmd)
+	}
+}
+
+func TestClaudeWindowAndCmd_ActionNoneUsesConfiguredFollowup(t *testing.T) {
+	m := newTestModel()
+	m.config.AgentCommands["followup"] = "custom followup {{pr_url}}"
+	r := &PRRow{
+		PR:     github.PR{URL: "https://github.com/org/repo/pull/6"},
+		Action: github.ActionNone,
+	}
+	window, cmd := m.claudeWindowAndCmd(r, "")
+	if window != "claude" {
+		t.Errorf("window: got %q, want %q", window, "claude")
+	}
+	if !strings.Contains(cmd, "custom followup https://github.com/org/repo/pull/6") {
 		t.Errorf("cmd should contain configured followup command with replacements: %s", cmd)
 	}
 }

@@ -173,7 +173,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown", "ctrl+d":
 			step := m.tablePageSize()
 			m.selected += step
-			if m.selected >= len(m.rows) {
+			if len(m.rows) == 0 {
+				m.selected = 0
+			} else if m.selected >= len(m.rows) {
 				m.selected = len(m.rows) - 1
 			}
 		case "t":
@@ -223,8 +225,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.samlErrors = msg.samlErrors
 			m.allRows = buildRows(msg.prs, msg.samlErrors)
 			m.applyFilters()
-			if m.selected >= len(m.rows) {
+			if len(m.rows) == 0 || m.selected < 0 {
 				m.selected = 0
+			} else if m.selected >= len(m.rows) {
+				m.selected = len(m.rows) - 1
 			}
 		}
 
@@ -701,7 +705,7 @@ func (m Model) renderTable() string {
 			if isSelected {
 				cell = cell.Inherit(selectedStyle)
 			}
-			if row >= 0 && row < len(urls) && col < len(urls[row]) {
+			if hyperlinksEnabled && row >= 0 && row < len(urls) && col < len(urls[row]) {
 				if u := urls[row][col]; u != "" {
 					cell = cell.Hyperlink(u)
 				}
