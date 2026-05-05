@@ -69,7 +69,7 @@ type sessionReadyMsg struct {
 // immediately with a prsFetchStartedMsg carrying a channel. The model drains
 // the channel via waitForFetchMsgCmd to receive streaming progress updates
 // and the final prsLoadedMsg.
-func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
+func fetchPRsCmd(ghClient *github.CachedClient, query string) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan tea.Msg, 64)
 		// recv is the receive-only handle stamped onto every message so the
@@ -80,7 +80,7 @@ func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
-			result, err := ghClient.FetchPRs(ctx, query, func(done, total int) {
+			result, err := ghClient.FetchPRsCached(ctx, query, true, func(done, total int) {
 				ch <- prsProgressMsg{progressCh: recv, done: done, total: total}
 			})
 			ch <- prsLoadedMsg{progressCh: recv, prs: result.PRs, samlErrors: result.Errors, err: err}
