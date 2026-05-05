@@ -35,10 +35,14 @@ run: build
 test:
 	$(GO) test $(GOFLAGS) ./...
 
-## test-acceptance: Run acceptance harness tests only
+## test-acceptance: Run TUI acceptance tests that exercise the mock PR fetcher harness
 .PHONY: test-acceptance
 test-acceptance:
-	$(GO) test $(GOFLAGS) ./... -run '^TestAcceptanceHarness_'
+	$(GO) test $(GOFLAGS) ./... -run '^TestAcceptance'
+
+## test-all: Run unit tests and acceptance tests
+.PHONY: test-all
+test-all: test test-acceptance
 
 ## test-verbose: Run all tests with verbose output
 .PHONY: test-verbose

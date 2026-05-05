@@ -37,7 +37,7 @@ type PRRow struct {
 }
 
 type Model struct {
-	ghClient     *github.GHClient
+	ghClient     github.PRFetcher
 	sessionMgr   *tmux.SessionManager
 	sessionStore *session.Store
 	config       config.Config
@@ -74,7 +74,7 @@ type Model struct {
 	samlErrors []github.SAMLErrorEntry
 }
 
-func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
+func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
 	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
@@ -818,8 +818,8 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 
 	// Prefix with GITHUB_TOKEN so the JS CLI (and any subprocess) uses our managed token
 	tokenPrefix := ""
-	if m.ghClient.Token() != "" {
-		escapedToken := strings.ReplaceAll(m.ghClient.Token(), "'", "'\"'\"'")
+	if token := fetcherToken(m.ghClient); token != "" {
+		escapedToken := strings.ReplaceAll(token, "'", "'\"'\"'")
 		tokenPrefix = fmt.Sprintf("GITHUB_TOKEN='%s' ", escapedToken)
 	}
 
@@ -827,6 +827,17 @@ func (m Model) claudeWindowAndCmd(r *PRRow, customPrompt string) (string, string
 	cmd = strings.ReplaceAll(cmd, "{{pr_number}}", fmt.Sprintf("%d", r.PR.Number))
 	cmd = strings.ReplaceAll(cmd, "{{repo_nwo}}", r.PR.RepoNameWithOwner)
 	return windowName, tokenPrefix + cmd
+}
+
+type tokenProvider interface {
+	Token() string
+}
+
+func fetcherToken(fetcher github.PRFetcher) string {
+	if provider, ok := fetcher.(tokenProvider); ok {
+		return provider.Token()
+	}
+	return ""
 }
 
 // renderError formats an error for the TUI status line. When the error chain
