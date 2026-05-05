@@ -69,7 +69,7 @@ type sessionReadyMsg struct {
 // immediately with a prsFetchStartedMsg carrying a channel. The model drains
 // the channel via waitForFetchMsgCmd to receive streaming progress updates
 // and the final prsLoadedMsg.
-func fetchPRsCmd(ghClient *github.GHClient, query string) tea.Cmd {
+func fetchPRsCmd(ghClient github.PRFetcher, query string) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan tea.Msg, 64)
 		// recv is the receive-only handle stamped onto every message so the

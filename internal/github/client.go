@@ -20,6 +20,13 @@ type GHClient struct {
 	token  string
 }
 
+// NewGHClientWithClient creates a GHClient using a pre-configured go-github client.
+// This is primarily intended for tests/acceptance harnesses that need to point the
+// client at a mocked HTTP server.
+func NewGHClientWithClient(client *gh.Client, token string) *GHClient {
+	return &GHClient{client: client, token: token}
+}
+
 // NewGHClient creates a GHClient with a token resolved from the standard chain.
 func NewGHClient() (*GHClient, error) {
 	token, source, err := ResolveToken()
