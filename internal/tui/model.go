@@ -63,7 +63,9 @@ type Model struct {
 	progressTotal int
 
 	// Overlays
-	showHelp bool
+	showHelp         bool
+	showThemePicker  bool
+	themePickerIndex int
 
 	notification string
 
@@ -107,6 +109,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// While the theme picker is open, intercept all keys so the table
+		// (and other shortcuts) don't see them.
+		if m.showThemePicker {
+			switch msg.String() {
+			case "up":
+				if m.themePickerIndex > 0 {
+					m.themePickerIndex--
+				}
+			case "down":
+				if m.themePickerIndex < len(ThemeNames)-1 {
+					m.themePickerIndex++
+				}
+			case "enter":
+				selected := ThemeNames[m.themePickerIndex]
+				m.styles = NewStyles(selected)
+				m.spinner.Style = m.styles.Loading
+				m.config.ColorScheme = selected
+				m.showThemePicker = false
+				if m.config.Path != "" {
+					_ = config.Save(m.config, m.config.Path)
+				}
+			case "esc":
+				m.showThemePicker = false
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -147,6 +176,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selected >= len(m.rows) {
 				m.selected = len(m.rows) - 1
 			}
+		case "t":
+			m.showThemePicker = true
+			m.themePickerIndex = 0
+			for i, name := range ThemeNames {
+				if name == m.config.ColorScheme {
+					m.themePickerIndex = i
+					break
+				}
+			}
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -220,6 +259,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m Model) renderThemePicker() string {
+	lines := make([]string, 0, len(ThemeNames)+3)
+	lines = append(lines, m.styles.HelpCategory.Render("Select Theme"))
+	for i, name := range ThemeNames {
+		if i == m.themePickerIndex {
+			lines = append(lines, m.styles.Indicator.Render("> ")+m.styles.SelectedRow.Render(name))
+		} else {
+			lines = append(lines, "  "+m.styles.Help.Render(name))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
 const cowsayDashboard = "" +
 	" _______________________________________\n" +
@@ -272,6 +326,11 @@ func (m Model) viewContent() string {
 	if m.showHelp {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderHelp())
+	}
+
+	if m.showThemePicker {
+		b.WriteString("\n\n")
+		b.WriteString(m.renderThemePicker())
 	}
 
 	return b.String()
@@ -761,6 +820,7 @@ var helpEntries = []helpEntry{
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
+	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
 }
 
