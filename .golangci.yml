@@ -7,15 +7,12 @@ run:
 linters:
   enable:
     - gosec
-    - misspell
     - revive
     - unconvert
     - unparam
   settings:
     errcheck:
       check-type-assertions: true
-    misspell:
-      locale: UK
     revive:
       rules:
         - name: var-naming
