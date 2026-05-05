@@ -23,6 +23,7 @@ type Config struct {
 	ServiceLabelPrefix string            `yaml:"service_label_prefix"`
 	AgentCommands      map[string]string `yaml:"agent_commands"`
 	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
+	ColorScheme        string            `yaml:"color_scheme,omitempty"`
 
 	// Path is the file path consulted during Load. Set even when the file
 	// does not exist (in which case Loaded is false). Not serialized.
@@ -37,6 +38,7 @@ func DefaultConfig() Config {
 		Views:              []View{{Name: "My PRs", Query: "author:@me is:open", Default: true}},
 		RepoBaseDir:        filepath.Join(home, "projects"),
 		ServiceLabelPrefix: "service:",
+		ColorScheme:        "default",
 		AgentCommands: map[string]string{
 			"fix-ci":            "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate the failing checks, identify the root cause, and fix the issues.'",
 			"address-feedback":  "claude --permission-mode acceptEdits 'This PR has review feedback that needs to be addressed: {{pr_url}} - Read the review comments and make the requested changes.'",
@@ -117,6 +119,9 @@ func LoadFromPath(path string) (Config, error) {
 	}
 	if cfg.AgentCommands == nil {
 		cfg.AgentCommands = DefaultConfig().AgentCommands
+	}
+	if cfg.ColorScheme == "" {
+		cfg.ColorScheme = DefaultConfig().ColorScheme
 	}
 
 	cfg.Path = path

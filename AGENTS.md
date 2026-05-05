@@ -34,3 +34,13 @@ Use short, imperative commit subjects such as `Add worktree setup for PR session
 
 ## Configuration & Environment Tips
 The app depends on local `git`, `tmux`, and GitHub CLI-compatible access through the configured runner. Avoid hardcoding machine-specific paths; use config-driven repo locations and session storage paths.
+
+## Cursor Cloud specific instructions
+
+**Runtime dependencies**: Go 1.25+, `tmux`, and `git` are pre-installed. `golangci-lint` is installed to `$HOME/go/bin` via the update script; `$HOME/go/bin` is already on `PATH` via `~/.bashrc`.
+
+**GitHub authentication**: The TUI requires a GitHub token. Set `GITHUB_TOKEN` or `GH_TOKEN` before running `./pr-wrangler`. In Cloud Agent VMs, `gh auth token` provides a token but it may have limited scopes (e.g. 403 on user fetch). The app still launches and displays its TUI; PR search results depend on token permissions.
+
+**Running the app**: `make build && GITHUB_TOKEN=$(gh auth token) ./pr-wrangler` launches the Bubble Tea TUI. Use `./pr-wrangler version` or `./pr-wrangler help` for non-interactive checks. The TUI is an alt-screen terminal app; press `q` to quit.
+
+**Standard dev commands**: See `## Build, Test, and Development Commands` above or run `make help`.
