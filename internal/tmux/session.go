@@ -72,7 +72,7 @@ func extractPRNumber(sessionName string) int {
 
 // SanitizeSessionName creates a tmux-safe session name from a PR title and number
 func SanitizeSessionName(title string, number int) string {
-	s := strings.ToLower(title)
+	s := strings.ToLower(strings.TrimSpace(title))
 	s = strings.NewReplacer(".", "-", ":", "-", "/", "-", "\\", "-").Replace(s)
 	s = reNonAlphanumHyphen.ReplaceAllString(s, "-")
 	s = reMultiHyphen.ReplaceAllString(s, "-")
@@ -84,7 +84,13 @@ func SanitizeSessionName(title string, number int) string {
 	s = strings.TrimRight(s, "-")
 
 	if number > 0 {
+		if s == "" {
+			return fmt.Sprintf("pr-%d", number)
+		}
 		return fmt.Sprintf("%s-%d", s, number)
+	}
+	if s == "" {
+		return "pr"
 	}
 	return s
 }
@@ -168,7 +174,11 @@ func (m *SessionManager) ListTmuxSessions(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, nil
 	}
-	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return []string{}, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
 }
 
 // SessionExists checks whether a tmux session with the given name exists.

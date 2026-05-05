@@ -280,3 +280,26 @@ func TestWorktreeDir(t *testing.T) {
 		t.Fatalf("path: got %q, want %q", got, want)
 	}
 }
+
+func TestSanitizeSessionName_EmptyTitleFallback(t *testing.T) {
+	if got := SanitizeSessionName("   ", 42); got != "pr-42" {
+		t.Fatalf("got %q, want %q", got, "pr-42")
+	}
+	if got := SanitizeSessionName("", 0); got != "pr" {
+		t.Fatalf("got %q, want %q", got, "pr")
+	}
+}
+
+func TestListTmuxSessions_EmptyOutput(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux list-sessions -F #{session_name}", "\n", nil)
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sessions, err := mgr.ListTmuxSessions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected zero sessions, got %v", sessions)
+	}
+}
