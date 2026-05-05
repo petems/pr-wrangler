@@ -58,7 +58,10 @@ func (s *Store) Save(records []SessionRecord) error {
 }
 
 func (s *Store) AddRecord(record SessionRecord) error {
-	records, _ := s.Load()
+	records, err := s.Load()
+	if err != nil {
+		return err
+	}
 	records = append([]SessionRecord{record}, records...)
 
 	// Keep max 1000 records
@@ -86,7 +89,10 @@ func (s *Store) DeleteRecord(id string) error {
 }
 
 func (s *Store) GetRecordsForPR(prNumber int) []SessionRecord {
-	records, _ := s.Load()
+	records, err := s.Load()
+	if err != nil {
+		return nil
+	}
 	var filtered []SessionRecord
 	for _, r := range records {
 		if r.PRNumber == prNumber {

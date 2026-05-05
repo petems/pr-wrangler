@@ -277,10 +277,18 @@ func runTUI() {
 		}
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error finding home directory: %v\n", err)
+		os.Exit(1)
+	}
 	sessionMgr := tmux.NewSessionManager(&tmux.ExecRunner{}, homeDir, cfg.RepoBaseDir)
 
-	historyPath, _ := sessionHistoryPath()
+	historyPath, err := sessionHistoryPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error finding session history path: %v\n", err)
+		os.Exit(1)
+	}
 	sessionStore := session.NewStore(historyPath)
 
 	m := tui.NewModel(ghClient, sessionMgr, sessionStore, cfg)
