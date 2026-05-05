@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 )
 
-func sendKey(t *testing.T, m Model, key tea.KeyMsg) Model {
+func sendKey(t *testing.T, m Model, key tea.KeyPressMsg) Model {
 	t.Helper()
 	updated, _ := m.Update(key)
 	next, ok := updated.(Model)
@@ -19,12 +19,20 @@ func sendKey(t *testing.T, m Model, key tea.KeyMsg) Model {
 	return next
 }
 
+func themePickerKeyPress() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Text: "t", Code: 't'})
+}
+
+func specialKeyPress(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Code: code})
+}
+
 func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ColorScheme = "solarized"
 	m := NewModel(nil, nil, nil, cfg)
 
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = sendKey(t, m, themePickerKeyPress())
 
 	if !m.showThemePicker {
 		t.Fatal("expected picker to be open")
@@ -36,17 +44,17 @@ func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 
 func TestThemePicker_DownClampsAtEnd(t *testing.T) {
 	m := NewModel(nil, nil, nil, config.DefaultConfig())
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = sendKey(t, m, themePickerKeyPress())
 
 	for i := 0; i < len(ThemeNames)+3; i++ {
-		m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		m = sendKey(t, m, specialKeyPress(tea.KeyDown))
 	}
 	if m.themePickerIndex != len(ThemeNames)-1 {
 		t.Errorf("index after over-scroll down: got %d, want %d", m.themePickerIndex, len(ThemeNames)-1)
 	}
 
 	for i := 0; i < len(ThemeNames)+3; i++ {
-		m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyUp})
+		m = sendKey(t, m, specialKeyPress(tea.KeyUp))
 	}
 	if m.themePickerIndex != 0 {
 		t.Errorf("index after over-scroll up: got %d, want 0", m.themePickerIndex)
@@ -57,9 +65,9 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 	m := NewModel(nil, nil, nil, config.DefaultConfig())
 	oldText := m.styles.TableText
 
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = sendKey(t, m, themePickerKeyPress())
+	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	m = sendKey(t, m, specialKeyPress(tea.KeyEnter))
 
 	if m.showThemePicker {
 		t.Fatal("expected picker to close after enter")
@@ -77,9 +85,9 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	originalScheme := m.config.ColorScheme
 	originalText := m.styles.TableText
 
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = sendKey(t, m, themePickerKeyPress())
+	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	m = sendKey(t, m, specialKeyPress(tea.KeyEsc))
 
 	if m.showThemePicker {
 		t.Fatal("expected picker to close after esc")
@@ -89,6 +97,36 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	}
 	if m.styles.TableText != originalText {
 		t.Error("styles should not change on cancel")
+	}
+}
+
+func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
+	m := Model{}
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyPgDown))
+
+	if m.selected != 0 {
+		t.Errorf("selected after pgdown with no rows: got %d, want 0", m.selected)
+	}
+}
+
+func TestSelection_LoadedRowsClampNegativeSelection(t *testing.T) {
+	progressCh := make(chan tea.Msg)
+	m := Model{selected: -1, progressCh: progressCh}
+
+	updated, _ := m.Update(prsLoadedMsg{
+		progressCh: progressCh,
+		prs: []github.PR{
+			{Number: 1, Title: "Open PR", State: github.PRStateOpen},
+		},
+	})
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.selected != 0 {
+		t.Errorf("selected after loading rows: got %d, want 0", next.selected)
 	}
 }
 
@@ -208,6 +246,102 @@ func TestBuildRows_SAMLWithoutAuthURL_ActionNone(t *testing.T) {
 	}
 	if rows[0].Action != github.ActionNone {
 		t.Errorf("expected ActionNone for SAML row without URL, got %q", rows[0].Action)
+	}
+}
+
+// --- table render / OSC 8 leakage regression ---
+
+// countOSC8Tokens returns (openers, closers) found in s. A closer is one of
+// the fixed-form sequences "\x1b]8;;\x1b\\" (ST-terminated) or "\x1b]8;;\x07"
+// (BEL-terminated). An opener is "\x1b]8;;<url>" followed by a terminator
+// where <url> is non-empty. If upstream truncation ever cuts a cell
+// mid-escape, the closer goes missing and openers > closers, which is the
+// regression class introduced by bubble-table v0.19.2.
+func countOSC8Tokens(s string) (openers, closers int) {
+	stClose := "\x1b]8;;\x1b\\"
+	belClose := "\x1b]8;;\x07"
+	closers = strings.Count(s, stClose) + strings.Count(s, belClose)
+	openers = strings.Count(s, "\x1b]8;;") - closers
+	return openers, closers
+}
+
+func newRenderableTestModel(t *testing.T) Model {
+	t.Helper()
+	prs := []github.PR{
+		{
+			Number:            123,
+			Title:             "Fix the thing that has a fairly long title to force truncation",
+			URL:               "https://github.com/octocat/hello-world/pull/123",
+			RepoNameWithOwner: "octocat/hello-world",
+			State:             github.PRStateOpen,
+		},
+		{
+			Number:            456,
+			Title:             "Another PR with stuff",
+			URL:               "https://github.com/octocat/spoon-knife/pull/456",
+			RepoNameWithOwner: "octocat/spoon-knife",
+			State:             github.PRStateOpen,
+		},
+	}
+	m := Model{
+		styles: NewStyles("default"),
+		width:  140,
+		height: 40,
+		rows:   buildRows(prs, nil),
+	}
+	return m
+}
+
+// TestRenderTable_NoOSC8Leakage is the regression test for the PR #15 bug:
+// cells in the PR table must never leave OSC 8 hyperlinks unterminated.
+// lipgloss/table uses charmbracelet/x/ansi for width math, so its truncation
+// path is OSC 8-aware. If anyone reverts to a renderer that isn't, this
+// test catches it.
+func TestRenderTable_NoOSC8Leakage(t *testing.T) {
+	defer withHyperlinks(t, true)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	openers, closers := countOSC8Tokens(rendered)
+	if openers != closers {
+		t.Errorf("OSC 8 leakage in rendered table: %d openers, %d closers (must be equal)\nrendered=%q", openers, closers, rendered)
+	}
+	// Sanity: we should actually be emitting hyperlinks (else the test
+	// doesn't exercise the wrapping path).
+	if openers == 0 {
+		t.Errorf("expected at least one OSC 8 hyperlink in rendered output, got 0")
+	}
+}
+
+// TestRenderTable_HyperlinksPresent verifies that per-cell hyperlinks are
+// being wrapped at all — guards against a silent regression where Style
+// .Hyperlink() stops being applied.
+func TestRenderTable_HyperlinksPresent(t *testing.T) {
+	defer withHyperlinks(t, true)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	for _, want := range []string{
+		"https://github.com/octocat/hello-world",
+		"https://github.com/octocat/hello-world/pull/123",
+		"https://github.com/octocat/spoon-knife/pull/456/checks",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered table missing hyperlink URL %q", want)
+		}
+	}
+}
+
+func TestRenderTable_HyperlinksDisabled(t *testing.T) {
+	defer withHyperlinks(t, false)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	if strings.Contains(rendered, "\x1b]8;;") {
+		t.Errorf("rendered table emitted OSC 8 hyperlink escapes while disabled: %q", rendered)
 	}
 }
 
@@ -440,16 +574,33 @@ func TestClaudeWindowAndCmd_ResolveConflicts(t *testing.T) {
 
 func TestClaudeWindowAndCmd_Default(t *testing.T) {
 	m := newTestModel()
+	m.config.AgentCommands["followup"] = "custom followup {{pr_url}} {{pr_number}} {{repo_nwo}}"
 	r := &PRRow{
-		PR:     github.PR{URL: "https://github.com/org/repo/pull/4"},
+		PR:     github.PR{URL: "https://github.com/org/repo/pull/4", Number: 4, RepoNameWithOwner: "org/repo"},
 		Action: github.ActionMerge,
 	}
 	window, cmd := m.claudeWindowAndCmd(r, "")
 	if window != "claude" {
 		t.Errorf("window: got %q, want %q", window, "claude")
 	}
-	if !strings.Contains(cmd, "Continue working") {
-		t.Errorf("cmd should contain 'Continue working': %s", cmd)
+	if !strings.Contains(cmd, "custom followup https://github.com/org/repo/pull/4 4 org/repo") {
+		t.Errorf("cmd should contain configured followup command with replacements: %s", cmd)
+	}
+}
+
+func TestClaudeWindowAndCmd_ActionNoneUsesConfiguredFollowup(t *testing.T) {
+	m := newTestModel()
+	m.config.AgentCommands["followup"] = "custom followup {{pr_url}}"
+	r := &PRRow{
+		PR:     github.PR{URL: "https://github.com/org/repo/pull/6"},
+		Action: github.ActionNone,
+	}
+	window, cmd := m.claudeWindowAndCmd(r, "")
+	if window != "claude" {
+		t.Errorf("window: got %q, want %q", window, "claude")
+	}
+	if !strings.Contains(cmd, "custom followup https://github.com/org/repo/pull/6") {
+		t.Errorf("cmd should contain configured followup command with replacements: %s", cmd)
 	}
 }
 

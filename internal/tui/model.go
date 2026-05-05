@@ -8,10 +8,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/evertras/bubble-table/table"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -49,7 +50,7 @@ type Model struct {
 
 	allRows   []PRRow
 	rows      []PRRow
-	table     table.Model
+	selected  int // highlighted row index in rows
 	loading   bool
 	lastError error
 
@@ -83,7 +84,7 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 	s.Spinner = spinner.Dot
 	s.Style = styles.Loading
 
-	m := Model{
+	return Model{
 		ghClient:     ghClient,
 		sessionMgr:   sessionMgr,
 		sessionStore: sessionStore,
@@ -93,8 +94,6 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 		spinner:      s,
 		prSessions:   make(map[int]tmux.PRSession),
 	}
-	m.table = m.rebuildTable()
-	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -109,7 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// While the theme picker is open, intercept all keys so the table
 		// (and other shortcuts) don't see them.
 		if m.showThemePicker {
@@ -127,7 +126,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.styles = NewStyles(selected)
 				m.spinner.Style = m.styles.Loading
 				m.config.ColorScheme = selected
-				m.table = m.rebuildTable()
 				m.showThemePicker = false
 				if m.config.Path != "" {
 					_ = config.Save(m.config, m.config.Path)
@@ -152,6 +150,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSelectedPR()
 		case "a":
 			return m, m.openSAMLAuthURL()
+		case "up", "k":
+			if m.selected > 0 {
+				m.selected--
+			}
+		case "down", "j":
+			if m.selected < len(m.rows)-1 {
+				m.selected++
+			}
+		case "home", "g":
+			m.selected = 0
+		case "end", "G":
+			if len(m.rows) > 0 {
+				m.selected = len(m.rows) - 1
+			}
+		case "pgup", "ctrl+u":
+			step := m.tablePageSize()
+			m.selected -= step
+			if m.selected < 0 {
+				m.selected = 0
+			}
+		case "pgdown", "ctrl+d":
+			step := m.tablePageSize()
+			m.selected += step
+			if len(m.rows) == 0 {
+				m.selected = 0
+			} else if m.selected >= len(m.rows) {
+				m.selected = len(m.rows) - 1
+			}
 		case "t":
 			m.showThemePicker = true
 			m.themePickerIndex = 0
@@ -164,18 +190,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		prevIdx := m.table.GetHighlightedRowIndex()
-		var cmd tea.Cmd
-		m.table, cmd = m.table.Update(msg)
-		if newIdx := m.table.GetHighlightedRowIndex(); newIdx != prevIdx {
-			m.table = m.table.WithRows(m.buildTableRows(newIdx))
-		}
-		return m, cmd
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.table = m.rebuildTable()
 
 	case prsFetchStartedMsg:
 		m.progressCh = msg.progressCh
@@ -208,7 +225,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.samlErrors = msg.samlErrors
 			m.allRows = buildRows(msg.prs, msg.samlErrors)
 			m.applyFilters()
-			m.table = m.rebuildTable()
+			if len(m.rows) == 0 || m.selected < 0 {
+				m.selected = 0
+			} else if m.selected >= len(m.rows) {
+				m.selected = len(m.rows) - 1
+			}
 		}
 
 	case spinner.TickMsg:
@@ -218,7 +239,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionsDiscoveredMsg:
 		m.prSessions = msg.sessions
-		m.table = m.rebuildTable()
 
 	case worktreeReadyMsg:
 		if msg.warning != "" {
@@ -269,7 +289,13 @@ const cowsayDashboard = "" +
 	"                ||----w |\n" +
 	"                ||     ||"
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) viewContent() string {
 	if m.loading && len(m.allRows) == 0 {
 		return m.renderLoadingScreen()
 	}
@@ -286,7 +312,7 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.table.View())
+	b.WriteString(m.renderTable())
 	b.WriteString("\n")
 
 	if m.lastError != nil {
@@ -316,10 +342,10 @@ func (m Model) View() string {
 
 // loadingTitle is the block-letter banner shown above the cowsay during loading.
 const loadingTitle = "" +
-	"\u2597\u2584\u2584\u2596 \u2597\u2584\u2584\u2596     \u2597\u2596 \u2597\u2596\u2597\u2584\u2584\u2596  \u2597\u2584\u2596 \u2597\u2596  \u2597\u2596 \u2597\u2584\u2584\u2596\u2597\u2596   \u2597\u2584\u2584\u2584\u2596\u2597\u2584\u2584\u2596 \n" +
-	"\u2590\u258c \u2590\u258c\u2590\u258c \u2590\u258c    \u2590\u258c \u2590\u258c\u2590\u258c \u2590\u258c\u2590\u258c \u2590\u258c\u2590\u259b\u259a\u2596\u2590\u258c\u2590\u258c   \u2590\u258c   \u2590\u258c   \u2590\u258c \u2590\u258c\n" +
-	"\u2590\u259b\u2580\u2598 \u2590\u259b\u2580\u259a\u2596    \u2590\u258c \u2590\u258c\u2590\u259b\u2580\u259a\u2596\u2590\u259b\u2580\u259c\u258c\u2590\u258c \u259d\u259c\u258c\u2590\u258c\u259d\u259c\u258c\u2590\u258c   \u2590\u259b\u2580\u2580\u2598\u2590\u259b\u2580\u259a\u2596\n" +
-	"\u2590\u258c   \u2590\u258c \u2590\u258c    \u2590\u2599\u2588\u259f\u258c\u2590\u258c \u2590\u258c\u2590\u258c \u2590\u258c\u2590\u258c  \u2590\u258c\u259d\u259a\u2584\u259e\u2598\u2590\u2599\u2584\u2584\u2596\u2590\u2599\u2584\u2584\u2596\u2590\u258c \u2590\u258c"
+	"▗▄▄▖ ▗▄▄▖     ▗▖ ▗▖▗▄▄▖  ▗▄▖ ▗▖  ▗▖ ▗▄▄▖▗▖   ▗▄▄▄▖▗▄▄▖ \n" +
+	"▐▌ ▐▌▐▌ ▐▌    ▐▌ ▐▌▐▌ ▐▌▐▌ ▐▌▐▛▚▖▐▌▐▌   ▐▌   ▐▌   ▐▌ ▐▌\n" +
+	"▐▛▀▘ ▐▛▀▚▖    ▐▌ ▐▌▐▛▀▚▖▐▛▀▜▌▐▌ ▝▜▌▐▌▝▜▌▐▌   ▐▛▀▀▘▐▛▀▚▖\n" +
+	"▐▌   ▐▌ ▐▌    ▐▙█▟▌▐▌ ▐▌▐▌ ▐▌▐▌  ▐▌▝▚▄▞▘▐▙▄▄▖▐▙▄▄▖▐▌ ▐▌"
 
 // cowsayLoading is the static cowsay template. Use %s for the spinner character.
 const cowsayLoading = "" +
@@ -554,17 +580,16 @@ func (m *Model) applyFilters() {
 const (
 	// nonTitleColumnsWidth reserves columns/padding around the Title column:
 	// indicator (2) + repo (20) + pr (8) + status (20) + action (20) plus
-	// per-column padding/borders.
+	// per-column borders and padding.
 	nonTitleColumnsWidth = 82
 	minTitleColumnWidth  = 10
 	// tableChromeLines reserves rows of the terminal for non-table chrome
 	// in View() so the cowsay header stays visible:
 	//   - cowsay block: 8 lines + 1 trailing blank = 9
 	//   - title line + 1 trailing blank          = 2
-	//   - bubble-table internal chrome
-	//     (top border, header row, header
-	//      separator, footer separator,
-	//      page-indicator row, bottom border)    = 6
+	//   - table chrome (top border, header,
+	//     header separator, bottom border)       = 4
+	//   - page indicator + blank                 = 2
 	//   - blank line after table + help line     = 2
 	//   - reserve for transient warning/error/
 	//     notification rows                      = 3
@@ -591,137 +616,133 @@ func (m Model) tablePageSize() int {
 	return m.height - tableChromeLines
 }
 
-func (m Model) rebuildTable() table.Model {
-	columns := []table.Column{
-		table.NewColumn("indicator", " ", 2),
-		table.NewColumn("repo", "Repo", 20),
-		table.NewColumn("pr", "PR", 8),
-		table.NewColumn("title", "Title", m.titleColumnWidth()),
-		table.NewColumn("status", "Status", 20),
-		table.NewColumn("action", "Action", 20),
-	}
-
-	highlighted := 0
-	if idx := m.table.GetHighlightedRowIndex(); idx >= 0 && idx < len(m.rows) {
-		highlighted = idx
-	}
-
-	return table.New(columns).
-		WithRows(m.buildTableRows(highlighted)).
-		Focused(true).
-		WithPageSize(m.tablePageSize()).
-		WithBaseStyle(lipgloss.NewStyle().Foreground(m.styles.TableText)).
-		HighlightStyle(m.styles.SelectedRow).
-		WithHighlightedRow(highlighted)
+// columnWidths returns the per-column widths in column order.
+func (m Model) columnWidths() []int {
+	return []int{2, 20, 8, m.titleColumnWidth(), 20, 20}
 }
 
-func (m Model) buildTableRows(highlighted int) []table.Row {
-	titleWidth := m.titleColumnWidth()
+// pageBounds returns the [start, end) row indices for the visible page,
+// keeping the selected row inside the window.
+func (m Model) pageBounds() (start, end, page, totalPages int) {
+	pageSize := m.tablePageSize()
+	if pageSize < 1 {
+		pageSize = 1
+	}
+	totalPages = (len(m.rows) + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	page = m.selected / pageSize
+	start = page * pageSize
+	end = start + pageSize
+	if end > len(m.rows) {
+		end = len(m.rows)
+	}
+	return start, end, page + 1, totalPages
+}
 
-	tableRows := make([]table.Row, 0, len(m.rows))
-	for i, r := range m.rows {
+func (m Model) renderTable() string {
+	if len(m.rows) == 0 {
+		return m.styles.Help.Render("(no rows)")
+	}
+
+	start, end, page, totalPages := m.pageBounds()
+	widths := m.columnWidths()
+
+	rows := make([][]string, 0, end-start)
+	urls := make([][]string, 0, end-start)
+	for i := start; i < end; i++ {
+		r := m.rows[i]
 		indicator := " "
-		if i == highlighted {
+		if i == m.selected {
 			indicator = ">"
 		}
-		repoCell := truncate(extractRepoName(r.PR.RepoNameWithOwner), 20)
+		repoCell := truncateAnsi(extractRepoName(r.PR.RepoNameWithOwner), widths[1])
 		prCell := fmt.Sprintf("#%d", r.PR.Number)
-		titleCell := truncate(r.PR.Title, titleWidth)
-		statusCell := r.Status.String()
+		titleCell := truncateAnsi(r.PR.Title, widths[3])
+		statusCell := truncateAnsi(r.Status.String(), widths[4])
+		actionCell := truncateAnsi(r.Action.String(), widths[5])
 
-		// Wrap cells with OSC 8 hyperlinks where we have URLs to point at.
-		// Repo cell -> repo root on github.com.
-		// PR# / title -> the PR itself.
-		// Status -> PR's checks tab so Cmd+Click jumps straight to Actions.
+		rows = append(rows, []string{indicator, repoCell, prCell, titleCell, statusCell, actionCell})
+
+		// Per-cell URLs. Empty string = no hyperlink for that cell.
+		repoURL := ""
 		if owner := r.PR.RepoNameWithOwner; owner != "" {
-			repoCell = Link("https://github.com/"+owner, repoCell)
+			repoURL = "https://github.com/" + owner
 		}
+		prURL := r.PR.URL
+		statusURL := ""
 		if r.PR.URL != "" {
-			prCell = Link(r.PR.URL, prCell)
-			titleCell = Link(r.PR.URL, titleCell)
-			statusCell = Link(r.PR.URL+"/checks", statusCell)
+			statusURL = r.PR.URL + "/checks"
 		}
-
-		tableRows = append(tableRows, table.NewRow(table.RowData{
-			"indicator": table.NewStyledCell(indicator, m.styles.Indicator),
-			"repo":      repoCell,
-			"pr":        prCell,
-			"title":     titleCell,
-			"status":    statusCell,
-			"action":    r.Action.String(),
-		}))
+		urls = append(urls, []string{"", repoURL, prURL, prURL, statusURL, ""})
 	}
-	return tableRows
+
+	headers := []string{" ", "Repo", "PR", "Title", "Status", "Action"}
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(m.styles.TableText)
+	baseStyle := lipgloss.NewStyle().Foreground(m.styles.TableText)
+	indicatorStyle := m.styles.Indicator
+	selectedStyle := m.styles.SelectedRow
+
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(m.styles.Help).
+		Headers(headers...).
+		Rows(rows...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			width := widths[col]
+			s := lipgloss.NewStyle().Width(width).Padding(0, 1)
+			if row == table.HeaderRow {
+				return s.Inherit(headerStyle)
+			}
+			// row is the visible-row index (0 = first body row)
+			rowIdx := start + row
+			isSelected := rowIdx == m.selected
+			cell := s.Inherit(baseStyle)
+			if col == 0 {
+				cell = s.Inherit(indicatorStyle)
+			}
+			if isSelected {
+				cell = cell.Inherit(selectedStyle)
+			}
+			if hyperlinksEnabled && row >= 0 && row < len(urls) && col < len(urls[row]) {
+				if u := urls[row][col]; u != "" {
+					cell = cell.Hyperlink(u)
+				}
+			}
+			return cell
+		})
+
+	out := t.Render()
+
+	// Page indicator
+	if totalPages > 1 {
+		out += "\n" + m.styles.Help.Render(fmt.Sprintf("page %d/%d  (%d rows)", page, totalPages, len(m.rows)))
+	}
+	return out
 }
 
-// buildRows interleaves successful PRs and SAML-protected placeholders back
-// into a single list in the original search-API ordering. prs is in original
-// order with SAML positions removed; samlErrors carries each SAML failure
-// tagged with its original index. Merged/closed PRs are filtered out.
-func buildRows(prs []github.PR, samlErrors []github.SAMLErrorEntry) []PRRow {
-	var rows []PRRow
-	prIdx := 0
-	samlIdx := 0
-	originalPos := 0
-
-	for prIdx < len(prs) || samlIdx < len(samlErrors) {
-		samlMatches := samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos
-		// Consume a SAML entry when its Index lines up, OR when prs is
-		// exhausted but SAML entries remain (only possible if the invariant
-		// from FetchPRs has drifted; treat as defensive fallback).
-		if samlMatches || prIdx >= len(prs) {
-			rows = append(rows, samlPlaceholderRow(samlErrors[samlIdx]))
-			samlIdx++
-			originalPos++
-			continue
-		}
-		// Bounds verified above: the prsExhausted branch above continues, so
-		// reaching this line implies prIdx < len(prs).
-		pr := prs[prIdx] // #nosec G602 -- guarded by prsExhausted check above
-		if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
-			status := github.DetermineStatus(pr)
-			rows = append(rows, PRRow{
-				PR:      pr,
-				Status:  status,
-				Action:  github.DetermineAction(status),
-				RowType: RowTypePR,
-			})
-		}
-		prIdx++
-		originalPos++
+// truncateAnsi returns s shortened to at most width display columns. It uses
+// charmbracelet/x/ansi.Truncate which is OSC 8-aware, so it's safe to call on
+// strings that already contain hyperlink wrappers.
+func truncateAnsi(s string, width int) string {
+	if width <= 0 {
+		return ""
 	}
-
-	return rows
-}
-
-// samlPlaceholderRow builds a PRRow for a SAML-protected PR that couldn't be
-// fetched. Action falls back to ActionNone when no authorization URL was
-// extracted, since pressing 'a' would otherwise no-op silently.
-func samlPlaceholderRow(entry github.SAMLErrorEntry) PRRow {
-	action := github.ActionAuthorizeSAML
-	if entry.Err == nil || entry.Err.AuthURL == "" {
-		action = github.ActionNone
+	if ansi.StringWidth(s) <= width {
+		return s
 	}
-	return PRRow{
-		PR: github.PR{
-			Number:            entry.PRNumber,
-			Title:             "SAML Authorization Required",
-			RepoNameWithOwner: entry.RepoNameWithOwner,
-			State:             github.PRStateOpen,
-		},
-		Status:    github.PRStatusSAMLRequired,
-		Action:    action,
-		RowType:   RowTypePR,
-		SAMLError: entry.Err,
+	if width <= 1 {
+		return ansi.Truncate(s, width, "")
 	}
+	return ansi.Truncate(s, width, "…")
 }
 
 func (m *Model) openSelectedPR() tea.Cmd {
-	idx := m.table.GetHighlightedRowIndex()
-	if idx < 0 || idx >= len(m.rows) {
+	if m.selected < 0 || m.selected >= len(m.rows) {
 		return nil
 	}
-	r := m.rows[idx]
+	r := m.rows[m.selected]
 	if r.PR.URL == "" {
 		return nil
 	}
@@ -732,11 +753,10 @@ func (m *Model) openSelectedPR() tea.Cmd {
 }
 
 func (m *Model) openSAMLAuthURL() tea.Cmd {
-	idx := m.table.GetHighlightedRowIndex()
-	if idx < 0 || idx >= len(m.rows) {
+	if m.selected < 0 || m.selected >= len(m.rows) {
 		return nil
 	}
-	r := m.rows[idx]
+	r := m.rows[m.selected]
 
 	// Only open SAML auth URL if this is a SAML-protected PR
 	if r.SAMLError == nil || r.SAMLError.AuthURL == "" {
@@ -750,13 +770,12 @@ func (m *Model) openSAMLAuthURL() tea.Cmd {
 }
 
 func (m Model) switchToSession() tea.Cmd {
-	idx := m.table.GetHighlightedRowIndex()
-	if idx < 0 || idx >= len(m.rows) {
+	if m.selected < 0 || m.selected >= len(m.rows) {
 		return func() tea.Msg {
 			return sessionErrorMsg{err: fmt.Errorf("no PR selected")}
 		}
 	}
-	r := m.rows[idx]
+	r := m.rows[m.selected]
 
 	if r.Status == github.PRStatusSAMLRequired {
 		msg := "authorize SAML for this org outside the app, then refresh"
@@ -804,6 +823,7 @@ var helpEntries = []helpEntry{
 	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
+	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
 	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
 }
@@ -830,16 +850,6 @@ func (m Model) renderHelp() string {
 		lines = append(lines, m.styles.Help.Render(e.longKey+padding+e.longDesc))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
 }
 
 func extractRepoName(nameWithOwner string) string {
@@ -922,4 +932,66 @@ func openBrowser(url string) {
 		return
 	}
 	_ = cmd.Start()
+}
+
+// buildRows interleaves successful PRs and SAML-protected placeholders back
+// into a single list in the original search-API ordering. prs is in original
+// order with SAML positions removed; samlErrors carries each SAML failure
+// tagged with its original index. Merged/closed PRs are filtered out.
+func buildRows(prs []github.PR, samlErrors []github.SAMLErrorEntry) []PRRow {
+	var rows []PRRow
+	prIdx := 0
+	samlIdx := 0
+	originalPos := 0
+
+	for prIdx < len(prs) || samlIdx < len(samlErrors) {
+		samlMatches := samlIdx < len(samlErrors) && samlErrors[samlIdx].Index == originalPos
+		// Consume a SAML entry when its Index lines up, OR when prs is
+		// exhausted but SAML entries remain (only possible if the invariant
+		// from FetchPRs has drifted; treat as defensive fallback).
+		if samlMatches || prIdx >= len(prs) {
+			rows = append(rows, samlPlaceholderRow(samlErrors[samlIdx]))
+			samlIdx++
+			originalPos++
+			continue
+		}
+		// Bounds verified above: the prsExhausted branch above continues, so
+		// reaching this line implies prIdx < len(prs).
+		pr := prs[prIdx] // #nosec G602 -- guarded by prsExhausted check above
+		if pr.State != github.PRStateMerged && pr.State != github.PRStateClosed {
+			status := github.DetermineStatus(pr)
+			rows = append(rows, PRRow{
+				PR:      pr,
+				Status:  status,
+				Action:  github.DetermineAction(status),
+				RowType: RowTypePR,
+			})
+		}
+		prIdx++
+		originalPos++
+	}
+
+	return rows
+}
+
+// samlPlaceholderRow builds a PRRow for a SAML-protected PR that couldn't be
+// fetched. Action falls back to ActionNone when no authorization URL was
+// extracted, since pressing 'a' would otherwise no-op silently.
+func samlPlaceholderRow(entry github.SAMLErrorEntry) PRRow {
+	action := github.ActionAuthorizeSAML
+	if entry.Err == nil || entry.Err.AuthURL == "" {
+		action = github.ActionNone
+	}
+	return PRRow{
+		PR: github.PR{
+			Number:            entry.PRNumber,
+			Title:             "SAML Authorization Required",
+			RepoNameWithOwner: entry.RepoNameWithOwner,
+			State:             github.PRStateOpen,
+		},
+		Status:    github.PRStatusSAMLRequired,
+		Action:    action,
+		RowType:   RowTypePR,
+		SAMLError: entry.Err,
+	}
 }

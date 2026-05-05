@@ -1,32 +1,23 @@
 package tui
 
 import (
-	"github.com/muesli/termenv"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// hyperlinksEnabled is resolved once on package init to avoid querying the
-// terminal profile for every cell render. Tests can override it.
-var hyperlinksEnabled = detectHyperlinkSupport()
-
-// detectHyperlinkSupport returns true when the active output supports
-// styling (i.e. is a TTY with a non-Ascii profile and NO_COLOR is unset).
-// We piggyback on termenv's profile detection so behavior stays consistent
-// with how lipgloss decides whether to emit color escapes.
-func detectHyperlinkSupport() bool {
-	out := termenv.DefaultOutput()
-	if out == nil {
-		return false
-	}
-	return out.Profile != termenv.Ascii
-}
+// hyperlinksEnabled gates emission of OSC 8 sequences. lipgloss v2 + bubbletea
+// v2 handle ANSI downsampling via colorprofile at the renderer layer, so
+// Link() defers to that rather than probing the terminal itself. Tests flip
+// this to make Link()'s output deterministic.
+var hyperlinksEnabled = true
 
 // Link wraps text with an OSC 8 hyperlink escape sequence so supporting
 // terminals (iTerm2, WezTerm, Kitty, Ghostty, modern Terminal.app, GNOME
-// Terminal, VS Code) render text as Cmd/Ctrl+Click-able. When the output
-// is not a TTY, NO_COLOR is set, or url/text is empty, Link returns text
-// unchanged so piped output and CI logs stay clean.
+// Terminal, VS Code) render text as Cmd/Ctrl+Click-able. When disabled, or
+// url/text is empty, Link returns text unchanged so piped output stays clean.
 //
-// The escape sequence used is: ESC ] 8 ; ; URL ESC \ TEXT ESC ] 8 ; ; ESC \
+// Inside lipgloss styles prefer Style.Hyperlink(url) — it integrates with
+// width math via charmbracelet/x/ansi. Use Link() for inline wrapping in
+// places that don't have a style (e.g. error message string interpolation).
 func Link(url, text string) string {
 	if url == "" || text == "" {
 		return text
@@ -34,5 +25,5 @@ func Link(url, text string) string {
 	if !hyperlinksEnabled {
 		return text
 	}
-	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+	return ansi.SetHyperlink(url) + text + ansi.ResetHyperlink()
 }
