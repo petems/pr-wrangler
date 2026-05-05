@@ -37,12 +37,10 @@ The app depends on local `git`, `tmux`, and GitHub CLI-compatible access through
 
 ## Cursor Cloud specific instructions
 
-**Runtime dependencies**: Go 1.25+, `tmux`, and `git` are pre-installed. `golangci-lint` is installed to `~/go/bin` via the update script; `$HOME/go/bin` is already on `PATH` via `~/.bashrc`.
+**Runtime dependencies**: Go 1.25+, `tmux`, and `git` are pre-installed. `golangci-lint` is installed to `$HOME/go/bin` via the update script; `$HOME/go/bin` is already on `PATH` via `~/.bashrc`.
 
 **GitHub authentication**: The TUI requires a GitHub token. Set `GITHUB_TOKEN` or `GH_TOKEN` before running `./pr-wrangler`. In Cloud Agent VMs, `gh auth token` provides a token but it may have limited scopes (e.g. 403 on user fetch). The app still launches and displays its TUI; PR search results depend on token permissions.
 
 **Running the app**: `make build && GITHUB_TOKEN=$(gh auth token) ./pr-wrangler` launches the Bubble Tea TUI. Use `./pr-wrangler version` or `./pr-wrangler help` for non-interactive checks. The TUI is an alt-screen terminal app; press `q` to quit.
-
-**Lint pre-existing warnings**: `make lint` reports 5 gosec G204 warnings (subprocess launched with variable) in `internal/tui/commands.go` and `internal/tui/model.go`. These are pre-existing and not regressions.
 
 **Standard dev commands**: See `## Build, Test, and Development Commands` above or run `make help`.
