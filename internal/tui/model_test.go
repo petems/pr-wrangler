@@ -127,6 +127,91 @@ func TestBuildRows_SAMLWithoutAuthURL_ActionNone(t *testing.T) {
 	}
 }
 
+// --- table render / OSC 8 leakage regression ---
+
+// countOSC8Tokens returns (openers, closers) found in s. A closer is one of
+// the fixed-form sequences "\x1b]8;;\x1b\\" (ST-terminated) or "\x1b]8;;\x07"
+// (BEL-terminated). An opener is "\x1b]8;;<url>" followed by a terminator
+// where <url> is non-empty. If upstream truncation ever cuts a cell
+// mid-escape, the closer goes missing and openers > closers, which is the
+// regression class introduced by bubble-table v0.19.2.
+func countOSC8Tokens(s string) (openers, closers int) {
+	stClose := "\x1b]8;;\x1b\\"
+	belClose := "\x1b]8;;\x07"
+	closers = strings.Count(s, stClose) + strings.Count(s, belClose)
+	openers = strings.Count(s, "\x1b]8;;") - closers
+	return openers, closers
+}
+
+func newRenderableTestModel(t *testing.T) Model {
+	t.Helper()
+	prs := []github.PR{
+		{
+			Number:            123,
+			Title:             "Fix the thing that has a fairly long title to force truncation",
+			URL:               "https://github.com/octocat/hello-world/pull/123",
+			RepoNameWithOwner: "octocat/hello-world",
+			State:             github.PRStateOpen,
+		},
+		{
+			Number:            456,
+			Title:             "Another PR with stuff",
+			URL:               "https://github.com/octocat/spoon-knife/pull/456",
+			RepoNameWithOwner: "octocat/spoon-knife",
+			State:             github.PRStateOpen,
+		},
+	}
+	m := Model{
+		styles: NewStyles("default"),
+		width:  140,
+		height: 40,
+		rows:   buildRows(prs, nil),
+	}
+	return m
+}
+
+// TestRenderTable_NoOSC8Leakage is the regression test for the PR #15 bug:
+// cells in the PR table must never leave OSC 8 hyperlinks unterminated.
+// lipgloss/table uses charmbracelet/x/ansi for width math, so its truncation
+// path is OSC 8-aware. If anyone reverts to a renderer that isn't, this
+// test catches it.
+func TestRenderTable_NoOSC8Leakage(t *testing.T) {
+	defer withHyperlinks(t, true)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	openers, closers := countOSC8Tokens(rendered)
+	if openers != closers {
+		t.Errorf("OSC 8 leakage in rendered table: %d openers, %d closers (must be equal)\nrendered=%q", openers, closers, rendered)
+	}
+	// Sanity: we should actually be emitting hyperlinks (else the test
+	// doesn't exercise the wrapping path).
+	if openers == 0 {
+		t.Errorf("expected at least one OSC 8 hyperlink in rendered output, got 0")
+	}
+}
+
+// TestRenderTable_HyperlinksPresent verifies that per-cell hyperlinks are
+// being wrapped at all — guards against a silent regression where Style
+// .Hyperlink() stops being applied.
+func TestRenderTable_HyperlinksPresent(t *testing.T) {
+	defer withHyperlinks(t, true)()
+
+	m := newRenderableTestModel(t)
+	rendered := m.renderTable()
+
+	for _, want := range []string{
+		"https://github.com/octocat/hello-world",
+		"https://github.com/octocat/hello-world/pull/123",
+		"https://github.com/octocat/spoon-knife/pull/456/checks",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered table missing hyperlink URL %q", want)
+		}
+	}
+}
+
 // --- renderCowsay tests ---
 
 func TestRenderCowsay_ContainsCowArt(t *testing.T) {

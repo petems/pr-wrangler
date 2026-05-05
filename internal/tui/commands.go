@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/tmux"
 )

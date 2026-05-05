@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -284,7 +284,7 @@ func runTUI() {
 	sessionStore := session.NewStore(historyPath)
 
 	m := tui.NewModel(ghClient, sessionMgr, sessionStore, cfg)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)

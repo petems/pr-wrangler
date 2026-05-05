@@ -5,14 +5,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 var hyperlinkStateMu sync.Mutex
 
 // withHyperlinks toggles the package-level enable flag for the duration of a
-// test, returning a cleanup function. Necessary because detectHyperlinkSupport
-// is a one-shot probe of the real terminal at init time.
+// test, returning a cleanup function.
 func withHyperlinks(t *testing.T, enabled bool) func() {
 	t.Helper()
 	hyperlinkStateMu.Lock()
@@ -24,17 +23,17 @@ func withHyperlinks(t *testing.T, enabled bool) func() {
 	}
 }
 
-func TestLink_TTYEnabled_EmitsOSC8(t *testing.T) {
+func TestLink_Enabled_EmitsOSC8(t *testing.T) {
 	defer withHyperlinks(t, true)()
 
 	got := Link("https://example.com/pr/1", "#1")
-	want := "\x1b]8;;https://example.com/pr/1\x1b\\#1\x1b]8;;\x1b\\"
+	want := "\x1b]8;;https://example.com/pr/1\x07#1\x1b]8;;\x07"
 	if got != want {
 		t.Errorf("Link(): got %q, want %q", got, want)
 	}
 }
 
-func TestLink_NonTTY_ReturnsPlainText(t *testing.T) {
+func TestLink_Disabled_ReturnsPlainText(t *testing.T) {
 	defer withHyperlinks(t, false)()
 
 	got := Link("https://example.com/pr/1", "#1")
@@ -42,7 +41,7 @@ func TestLink_NonTTY_ReturnsPlainText(t *testing.T) {
 		t.Errorf("Link(): got %q, want plain text %q", got, "#1")
 	}
 	if strings.Contains(got, "\x1b") {
-		t.Errorf("Link() leaked escape sequence in non-TTY output: %q", got)
+		t.Errorf("Link() leaked escape sequence in disabled output: %q", got)
 	}
 }
 

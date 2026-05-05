@@ -1,18 +1,20 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	"charm.land/lipgloss/v2"
 )
 
 // ColorScheme holds the palette used by the TUI styles.
 type ColorScheme struct {
-	Primary    lipgloss.Color // title, banner, indicator
-	Secondary  lipgloss.Color // loading, help category headings
-	Error      lipgloss.Color // error messages
-	Warning    lipgloss.Color // warning messages
-	Help       lipgloss.Color // general help text
-	SelectedBg lipgloss.Color // selected row background
-	TableText  lipgloss.Color // table base text foreground
+	Primary    color.Color // title, banner, indicator
+	Secondary  color.Color // loading, help category headings
+	Error      color.Color // error messages
+	Warning    color.Color // warning messages
+	Help       color.Color // general help text
+	SelectedBg color.Color // selected row background
+	TableText  color.Color // table base text foreground
 }
 
 // colorSchemes maps scheme names to their palettes.
@@ -64,7 +66,7 @@ var colorSchemes = map[string]ColorScheme{
 // same process with independent themes and tests can construct deterministic
 // styles without mutating package state.
 type Styles struct {
-	TableText    lipgloss.Color
+	TableText    color.Color
 	Title        lipgloss.Style
 	Banner       lipgloss.Style
 	Help         lipgloss.Style
