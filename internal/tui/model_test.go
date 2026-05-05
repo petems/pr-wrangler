@@ -4,9 +4,93 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 )
+
+func sendKey(t *testing.T, m Model, key tea.KeyMsg) Model {
+	t.Helper()
+	updated, _ := m.Update(key)
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	return next
+}
+
+func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ColorScheme = "solarized"
+	m := NewModel(nil, nil, nil, cfg)
+
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+
+	if !m.showThemePicker {
+		t.Fatal("expected picker to be open")
+	}
+	if got, want := ThemeNames[m.themePickerIndex], "solarized"; got != want {
+		t.Errorf("highlighted theme: got %q, want %q", got, want)
+	}
+}
+
+func TestThemePicker_DownClampsAtEnd(t *testing.T) {
+	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+
+	for i := 0; i < len(ThemeNames)+3; i++ {
+		m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.themePickerIndex != len(ThemeNames)-1 {
+		t.Errorf("index after over-scroll down: got %d, want %d", m.themePickerIndex, len(ThemeNames)-1)
+	}
+
+	for i := 0; i < len(ThemeNames)+3; i++ {
+		m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+	if m.themePickerIndex != 0 {
+		t.Errorf("index after over-scroll up: got %d, want 0", m.themePickerIndex)
+	}
+}
+
+func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
+	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	oldText := m.styles.TableText
+
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.showThemePicker {
+		t.Fatal("expected picker to close after enter")
+	}
+	if got, want := m.config.ColorScheme, ThemeNames[1]; got != want {
+		t.Errorf("config scheme: got %q, want %q", got, want)
+	}
+	if m.styles.TableText == oldText {
+		t.Error("expected styles to update after applying theme")
+	}
+}
+
+func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
+	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	originalScheme := m.config.ColorScheme
+	originalText := m.styles.TableText
+
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = sendKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.showThemePicker {
+		t.Fatal("expected picker to close after esc")
+	}
+	if m.config.ColorScheme != originalScheme {
+		t.Errorf("config scheme changed on cancel: got %q, want %q", m.config.ColorScheme, originalScheme)
+	}
+	if m.styles.TableText != originalText {
+		t.Error("styles should not change on cancel")
+	}
+}
 
 func TestBuildRows_HidesMergedPRs(t *testing.T) {
 	prs := []github.PR{
