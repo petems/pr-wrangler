@@ -35,6 +35,11 @@ run: build
 test:
 	$(GO) test $(GOFLAGS) ./...
 
+## test-acceptance: Run acceptance harness tests only
+.PHONY: test-acceptance
+test-acceptance:
+	$(GO) test $(GOFLAGS) ./... -run '^TestAcceptanceHarness_'
+
 ## test-verbose: Run all tests with verbose output
 .PHONY: test-verbose
 test-verbose:
