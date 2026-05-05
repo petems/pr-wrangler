@@ -43,6 +43,7 @@ type Model struct {
 	config       config.Config
 
 	styles Styles
+	colorScheme string
 
 	width  int
 	height int
@@ -75,7 +76,8 @@ type Model struct {
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
-	styles := NewStyles(cfg.ColorScheme)
+	scheme := cfg.ColorScheme
+	styles := NewStyles(scheme)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -87,6 +89,7 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 		sessionStore: sessionStore,
 		config:       cfg,
 		styles:       styles,
+		colorScheme:  scheme,
 		loading:      true,
 		spinner:      s,
 		prSessions:   make(map[int]tmux.PRSession),
@@ -122,6 +125,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.openSelectedPR()
 		case "a":
 			return m, m.openSAMLAuthURL()
+		case "t":
+			m.cycleColorScheme()
+			return m, m.persistColorSchemeCmd()
 		}
 
 		prevIdx := m.table.GetHighlightedRowIndex()
@@ -201,6 +207,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) cycleColorScheme() {
+	names := ColorSchemeNames()
+	if len(names) == 0 {
+		return
+	}
+	idx := 0
+	for i, name := range names {
+		if name == m.colorScheme {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + 1) % len(names)
+	newScheme := names[idx]
+
+	m.colorScheme = newScheme
+	m.config.ColorScheme = newScheme
+	m.styles = NewStyles(newScheme)
+	m.spinner.Style = m.styles.Loading
+	m.table = m.rebuildTable()
+	m.notification = fmt.Sprintf("Color scheme: %s", newScheme)
+}
+
+func (m Model) persistColorSchemeCmd() tea.Cmd {
+	if m.config.Path == "" {
+		return nil
+	}
+	cfg := m.config
+	path := m.config.Path
+	return func() tea.Msg {
+		if err := config.Save(cfg, path); err != nil {
+			return sessionErrorMsg{err: fmt.Errorf("saving config: %w", err)}
+		}
+		return nil
+	}
 }
 
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
@@ -744,6 +787,7 @@ var helpEntries = []helpEntry{
 	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
+	{"t", "t", "theme", "cycle color scheme"},
 	{"?", "?", "help", "toggle help"},
 }
 

@@ -59,6 +59,11 @@ var colorSchemes = map[string]ColorScheme{
 	},
 }
 
+// ColorSchemeNames returns the available scheme names in a stable order.
+func ColorSchemeNames() []string {
+	return []string{"default", "dracula", "solarized", "nord"}
+}
+
 // Styles holds the rendered lipgloss styles for a single Model instance.
 // Each Model owns its own Styles, so multiple TUI instances can run in the
 // same process with independent themes and tests can construct deterministic

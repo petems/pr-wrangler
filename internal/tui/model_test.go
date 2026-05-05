@@ -8,6 +8,25 @@ import (
 	"github.com/petems/pr-wrangler/internal/github"
 )
 
+func TestCycleColorSchemeUpdatesStylesAndConfig(t *testing.T) {
+	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	if m.colorScheme != "default" {
+		t.Fatalf("expected default scheme, got %q", m.colorScheme)
+	}
+	oldText := m.styles.TableText
+
+	m.cycleColorScheme()
+	if m.colorScheme == "default" {
+		t.Fatalf("expected scheme to change")
+	}
+	if m.config.ColorScheme != m.colorScheme {
+		t.Fatalf("expected config scheme %q to match model %q", m.config.ColorScheme, m.colorScheme)
+	}
+	if m.styles.TableText == oldText {
+		t.Fatalf("expected styles to update")
+	}
+}
+
 func TestBuildRows_HidesMergedPRs(t *testing.T) {
 	prs := []github.PR{
 		{Number: 1, Title: "Open PR", State: github.PRStateOpen},
