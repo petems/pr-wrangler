@@ -75,7 +75,7 @@ func SaveToken(info *TokenInfo) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 
@@ -84,11 +84,11 @@ func SaveToken(info *TokenInfo) error {
 		return fmt.Errorf("marshaling token: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("writing auth file: %w", err)
 	}
 
-	if err := os.Chmod(path, 0600); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil {
 		return fmt.Errorf("setting auth file permissions: %w", err)
 	}
 

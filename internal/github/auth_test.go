@@ -30,7 +30,7 @@ func TestSaveAndLoadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat auth file: %v", err)
 	}
-	if got := stat.Mode().Perm(); got != 0600 {
+	if got := stat.Mode().Perm(); got != 0o600 {
 		t.Fatalf("auth file mode: got %v, want 0600", got)
 	}
 

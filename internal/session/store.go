@@ -18,7 +18,6 @@ func NewStore(path string) *Store {
 
 func (s *Store) Load() ([]SessionRecord, error) {
 	data, err := os.ReadFile(s.Path) // #nosec G304 -- path is user's own session history file
-
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -51,7 +50,6 @@ func (s *Store) Save(records []SessionRecord) error {
 	}
 
 	if err := os.WriteFile(s.Path, data, 0o600); err != nil {
-
 		return fmt.Errorf("writing session history: %w", err)
 	}
 	return nil

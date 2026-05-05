@@ -43,7 +43,6 @@ func SessionsPath() (string, error) {
 // (not error) if the file is missing or unparseable.
 func LoadSessions(path string) SessionState {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is user's own sessions file
-
 	if err != nil {
 		return SessionState{}
 	}
