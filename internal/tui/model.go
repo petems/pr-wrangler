@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -38,6 +39,7 @@ type PRRow struct {
 
 type Model struct {
 	ghClient     *github.GHClient
+	cachedClient *github.CachedClient
 	sessionMgr   *tmux.SessionManager
 	sessionStore *session.Store
 	config       config.Config
@@ -83,6 +85,7 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 
 	m := Model{
 		ghClient:     ghClient,
+		cachedClient: github.NewCachedClient(ghClient, 30*time.Second),
 		sessionMgr:   sessionMgr,
 		sessionStore: sessionStore,
 		config:       cfg,
@@ -478,7 +481,7 @@ func renderProgressBar(done, total, width int) string {
 }
 
 func (m *Model) refreshCmd() tea.Cmd {
-	return fetchPRsCmd(m.ghClient, m.configuredQuery())
+	return fetchPRsCmd(m.cachedClient, m.configuredQuery())
 }
 
 func (m *Model) discoverSessionsCmd() tea.Cmd {
