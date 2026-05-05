@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 )
+
 var hyperlinkStateMu sync.Mutex
 
 // withHyperlinks toggles the package-level enable flag for the duration of a
