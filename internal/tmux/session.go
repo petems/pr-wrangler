@@ -250,15 +250,13 @@ func (m *SessionManager) RepoInfoFromPath(ctx context.Context, path string) (Rep
 	}
 	commonDir := strings.TrimSpace(string(out))
 
-	var repoDir string
-	if commonDir == ".git" {
-		// Main worktree: --git-common-dir returns the relative literal ".git".
-		repoDir = worktreePath
-	} else {
-		// Auxiliary worktree: commonDir is an absolute path like
-		// /home/user/projects/myrepo/.git — repo root is its parent.
-		repoDir = filepath.Dir(commonDir)
+	// `--git-common-dir` may be absolute (auxiliary worktree) or relative to
+	// `path` (main worktree, including subdirectories where it can be e.g.
+	// "../../.git"). Normalize before deriving the repo root.
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Clean(filepath.Join(path, commonDir))
 	}
+	repoDir := filepath.Dir(commonDir)
 
 	return RepoInfo{
 		Repo:         filepath.Base(repoDir),

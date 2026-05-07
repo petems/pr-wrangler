@@ -305,6 +305,23 @@ func TestRepoInfoFromPath(t *testing.T) {
 			},
 		},
 		{
+			name: "main worktree subdirectory with relative common dir",
+			path: "/home/test/src/myrepo/internal/tmux",
+			setup: func(r *mockRunner) {
+				r.set("git -C /home/test/src/myrepo/internal/tmux rev-parse --show-toplevel",
+					"/home/test/src/myrepo\n", nil)
+				r.set("git -C /home/test/src/myrepo/internal/tmux rev-parse --abbrev-ref HEAD",
+					"main\n", nil)
+				r.set("git -C /home/test/src/myrepo/internal/tmux rev-parse --git-common-dir",
+					"../../.git\n", nil)
+			},
+			wantInfo: RepoInfo{
+				Repo:         "myrepo",
+				Branch:       "main",
+				WorktreePath: "/home/test/src/myrepo",
+			},
+		},
+		{
 			name: "auxiliary worktree",
 			path: "/home/test/src/myrepo-worktrees/feature-xyz",
 			setup: func(r *mockRunner) {
