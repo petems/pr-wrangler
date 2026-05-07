@@ -142,19 +142,35 @@ func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, w
 
 // ensureSessionCmd creates the tmux session/window if needed, then sends
 // sessionReadyMsg so Update() can call switchClientCmd with tea.ExecProcess.
+//
+// On brand-new session creation we seed a `shell` window first (window 0,
+// no command), then add the action window. We always explicitly select the
+// action window before switching clients so re-entering an existing session
+// lands there deterministically. Closing the agent in the action window
+// leaves the user in `shell` at the worktree path.
 func ensureSessionCmd(mgr *tmux.SessionManager, sess tmux.PRSession, windowName, shellCmd string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if !mgr.SessionExists(ctx, sess.SessionName) {
-			if err := mgr.CreateSessionWithWindow(ctx, sess, windowName, shellCmd); err != nil {
+		switch {
+		case !mgr.SessionExists(ctx, sess.SessionName):
+			// Seed `shell` as the initial window (no command), then add
+			// the action window.
+			if err := mgr.CreateSessionWithWindow(ctx, sess, "shell", ""); err != nil {
 				return sessionErrorMsg{err: fmt.Errorf("creating session %q: %w", sess.SessionName, err)}
 			}
-		} else if !mgr.WindowExists(ctx, sess.SessionName, windowName) {
 			if err := mgr.CreateNamedWindow(ctx, sess.SessionName, windowName, sess.WorkDir, shellCmd); err != nil {
 				return sessionErrorMsg{err: fmt.Errorf("creating window %q: %w", windowName, err)}
 			}
+		case !mgr.WindowExists(ctx, sess.SessionName, windowName):
+			if err := mgr.CreateNamedWindow(ctx, sess.SessionName, windowName, sess.WorkDir, shellCmd); err != nil {
+				return sessionErrorMsg{err: fmt.Errorf("creating window %q: %w", windowName, err)}
+			}
+		}
+
+		if err := mgr.SwitchToWindow(ctx, sess.SessionName, windowName); err != nil {
+			return sessionErrorMsg{err: fmt.Errorf("selecting window %q: %w", windowName, err)}
 		}
 
 		return sessionReadyMsg{sessionName: sess.SessionName, windowName: windowName}

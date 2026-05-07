@@ -164,6 +164,34 @@ func TestCreateNamedWindow(t *testing.T) {
 	}
 }
 
+func TestSwitchToWindow(t *testing.T) {
+	runner := newMockRunner()
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	if err := mgr.SwitchToWindow(context.Background(), "my-sess", "ci-fix"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	call := runner.lastCall()
+	// Expect: tmux select-window -t my-sess:ci-fix
+	if len(call) != 4 {
+		t.Fatalf("expected 4 args, got %d: %v", len(call), call)
+	}
+	if call[0] != "tmux" || call[1] != "select-window" || call[2] != "-t" || call[3] != "my-sess:ci-fix" {
+		t.Errorf("unexpected call: %v", call)
+	}
+}
+
+func TestSwitchToWindow_Error(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux select-window -t bad:win", "", fmt.Errorf("no such window"))
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	if err := mgr.SwitchToWindow(context.Background(), "bad", "win"); err == nil {
+		t.Error("expected error from SwitchToWindow")
+	}
+}
+
 func TestSwitchToSession_InsideTmux(t *testing.T) {
 	runner := newMockRunner()
 	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
