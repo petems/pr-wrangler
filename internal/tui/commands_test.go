@@ -58,6 +58,7 @@ func TestEnsureSessionCmd(t *testing.T) {
 		name      string
 		setup     func(*fakeRunner)
 		wantCalls [][]string
+		wantErr   bool
 	}{
 		{
 			name: "brand-new session seeds shell then action then selects action",
@@ -104,6 +105,26 @@ func TestEnsureSessionCmd(t *testing.T) {
 				{"tmux", "select-window", "-t", sessionName + ":" + windowName},
 			},
 		},
+		{
+			name: "brand-new session select-window failure returns sessionErrorMsg",
+			setup: func(r *fakeRunner) {
+				// has-session fails → session does not exist, so SwitchToWindow runs
+				r.set("tmux has-session -t "+sessionName, "", fmt.Errorf("no session"))
+				// select-window fails after the windows are created
+				r.set(
+					"tmux select-window -t "+sessionName+":"+windowName,
+					"",
+					fmt.Errorf("select-window failed"),
+				)
+			},
+			wantCalls: [][]string{
+				{"tmux", "has-session", "-t", sessionName},
+				{"tmux", "new-session", "-d", "-s", sessionName, "-n", "shell", "-c", workDir},
+				{"tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir, shellCmd},
+				{"tmux", "select-window", "-t", sessionName + ":" + windowName},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -114,13 +135,23 @@ func TestEnsureSessionCmd(t *testing.T) {
 
 			msg := ensureSessionCmd(mgr, sess, windowName, shellCmd)()
 
-			ready, ok := msg.(sessionReadyMsg)
-			if !ok {
-				t.Fatalf("expected sessionReadyMsg, got %T: %#v", msg, msg)
-			}
-			if ready.sessionName != sessionName || ready.windowName != windowName {
-				t.Errorf("sessionReadyMsg: got %+v, want {sessionName:%q windowName:%q}",
-					ready, sessionName, windowName)
+			if tc.wantErr {
+				errMsg, ok := msg.(sessionErrorMsg)
+				if !ok {
+					t.Fatalf("expected sessionErrorMsg, got %T: %#v", msg, msg)
+				}
+				if errMsg.err == nil {
+					t.Errorf("sessionErrorMsg.err is nil, want non-nil")
+				}
+			} else {
+				ready, ok := msg.(sessionReadyMsg)
+				if !ok {
+					t.Fatalf("expected sessionReadyMsg, got %T: %#v", msg, msg)
+				}
+				if ready.sessionName != sessionName || ready.windowName != windowName {
+					t.Errorf("sessionReadyMsg: got %+v, want {sessionName:%q windowName:%q}",
+						ready, sessionName, windowName)
+				}
 			}
 
 			if !reflect.DeepEqual(runner.calls, tc.wantCalls) {
