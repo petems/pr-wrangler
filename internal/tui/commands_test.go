@@ -55,10 +55,11 @@ func TestEnsureSessionCmd(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		setup     func(*fakeRunner)
-		wantCalls [][]string
-		wantErr   bool
+		name        string
+		setup       func(*fakeRunner)
+		wantCalls   [][]string
+		wantErr     bool
+		wantErrText string
 	}{
 		{
 			name: "brand-new session seeds shell then action then selects action",
@@ -123,7 +124,8 @@ func TestEnsureSessionCmd(t *testing.T) {
 				{"tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir, shellCmd},
 				{"tmux", "select-window", "-t", sessionName + ":" + windowName},
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrText: `selecting window "` + windowName + `":`,
 		},
 	}
 
@@ -141,7 +143,10 @@ func TestEnsureSessionCmd(t *testing.T) {
 					t.Fatalf("expected sessionErrorMsg, got %T: %#v", msg, msg)
 				}
 				if errMsg.err == nil {
-					t.Errorf("sessionErrorMsg.err is nil, want non-nil")
+					t.Fatalf("sessionErrorMsg.err is nil, want non-nil")
+				}
+				if tc.wantErrText != "" && !strings.Contains(errMsg.err.Error(), tc.wantErrText) {
+					t.Errorf("sessionErrorMsg.err = %q, want substring %q", errMsg.err.Error(), tc.wantErrText)
 				}
 			} else {
 				ready, ok := msg.(sessionReadyMsg)
