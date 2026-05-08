@@ -662,6 +662,85 @@ func TestTablePageSize(t *testing.T) {
 	}
 }
 
+// --- demo mode ---
+
+// TestNewDemoModel_InitAndKeypressesDoNotPanic is the regression test for the
+// nil-pointer panic in fetchPRsCmd when Init() ran refreshCmd() against the
+// demo model's nil *github.GHClient. The earlier test suite called Update()
+// on hand-built Model literals but never exercised the demo construction
+// path, so the panic only surfaced at program start.
+//
+// This test runs every keypress that previously dispatched a Cmd against
+// ghClient/sessionMgr/sessionStore (refresh, session switch, navigation),
+// then drains the Init()-returned Batch by invoking the underlying tea.Cmd.
+// Any nil deref reintroduced in that path will trigger a goroutine panic
+// the runtime surfaces as a test failure.
+func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig())
+
+	if m.ghClient != nil || m.sessionMgr != nil || m.sessionStore != nil {
+		t.Fatalf("demo model should leave clients nil, got ghClient=%v sessionMgr=%v sessionStore=%v",
+			m.ghClient, m.sessionMgr, m.sessionStore)
+	}
+	if !m.demoMode {
+		t.Fatal("demo model should set demoMode=true")
+	}
+	if len(m.rows) == 0 {
+		t.Fatal("demo model should have populated rows")
+	}
+
+	// Init() must not return any Cmd that, when executed, hits the nil
+	// ghClient/sessionMgr.
+	if cmd := m.Init(); cmd != nil {
+		_ = cmd() // should not panic
+	}
+
+	// These keypresses previously dispatched commands that dereferenced
+	// nil clients. With the demo guards in place each must be a safe no-op
+	// or surface a notification/error message.
+	for _, key := range []string{"r", "enter", "c", "j", "k", "?", "a", "o"} {
+		press := tea.KeyPressMsg(tea.Key{Text: key, Code: rune(key[0])})
+		updated, cmd := m.Update(press)
+		next, ok := updated.(Model)
+		if !ok {
+			t.Fatalf("key %q: Update returned %T, want Model", key, updated)
+		}
+		m = next
+		if cmd != nil {
+			_ = cmd() // execute the returned Cmd to surface any nil deref
+		}
+	}
+}
+
+// TestDemoModel_RefreshIsNoOp guards against accidentally re-enabling the
+// network refresh path in demo mode. Pressing 'r' must not flip loading=true
+// (which would hide the populated rows behind the cowsay loading screen) or
+// dispatch a fetch command.
+func TestDemoModel_RefreshIsNoOp(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig())
+	rowsBefore := len(m.rows)
+
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.loading {
+		t.Error("demo refresh must not flip loading=true")
+	}
+	if len(next.rows) != rowsBefore {
+		t.Errorf("rows changed unexpectedly: before=%d after=%d", rowsBefore, len(next.rows))
+	}
+	if next.notification == "" {
+		t.Error("demo refresh should set a notification explaining it's disabled")
+	}
+	if cmd != nil {
+		// Should be nil; if not, executing must still not panic.
+		_ = cmd()
+	}
+}
+
 // stripANSI removes ANSI escape sequences for measuring visible width.
 // Handles both SGR-style CSI sequences (ESC [ ... <letter>) and OSC sequences
 // such as OSC 8 hyperlinks (ESC ] ... ESC \ or BEL terminator). The latter is

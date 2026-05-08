@@ -68,6 +68,38 @@ Set `color_scheme` to one of the following values (default: `default`):
 
 Session history is stored at `~/.config/pr-wrangler/history.json`.
 
+## Demo Mode
+
+`pr-wrangler` ships with a built-in demo mode that renders the TUI from a fixed set of mock PRs, SAML errors, and tmux sessions. It does **not** call the GitHub API and does **not** require any authentication, so it's useful for screenshots, talks, or just kicking the tyres without a token.
+
+```bash
+pr-wrangler demo            # interactive TUI populated with mock data
+pr-wrangler demo --render   # render one frame to stdout (ANSI colour codes preserved)
+pr-wrangler demo -r         # short form of --render
+```
+
+For convenience the Makefile exposes the same flows:
+
+```bash
+make preview          # builds the binary and runs `pr-wrangler demo --render`
+make preview-capture  # writes the rendered frame to preview.txt
+```
+
+The mock data covers a representative slice of states: open/draft PRs, passing/failing/pending CI, approved/changes-requested/commented reviews, mergeable/conflicting branches, and SAML-protected placeholders.
+
+## PR Preview Comments
+
+The CI pipeline includes a `UI Preview` job that runs on every pull request. It:
+
+1. Builds `pr-wrangler` from the PR branch.
+2. Runs `pr-wrangler demo --render` to capture an ANSI snapshot of the TUI.
+3. Uploads the snapshot as a workflow artifact (`ui-preview`).
+4. Posts (or updates) a comment on the PR with the snapshot wrapped in an `ansi` code block under a `## 🖥️ UI Preview` header.
+
+The comment is keyed by a hidden marker (`<!-- pr-wrangler:ui-preview -->`), so subsequent pushes update the existing comment instead of creating duplicates.
+
+The preview captures ANSI colour codes — GitHub's `ansi` fenced-code rendering will colour the snapshot, and the raw `preview.txt` artifact can be `cat`'d in any colour-capable terminal for a faithful reproduction. Any UI change you make on a PR will surface in the comment automatically, which makes review of styling tweaks much easier.
+
 ## Repository Layout
 
 - `main.go`: CLI entrypoint

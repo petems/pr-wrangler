@@ -91,10 +91,21 @@ tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
 
+## preview: Render one frame of the demo TUI to stdout (ANSI colour)
+.PHONY: preview
+preview: build
+	./$(BINARY) demo --render
+
+## preview-capture: Render the demo TUI and write to preview.txt
+.PHONY: preview-capture
+preview-capture: build
+	./$(BINARY) demo --render > preview.txt
+	@echo "Wrote preview.txt ($$(wc -l < preview.txt) lines)"
+
 ## clean: Remove build artifacts
 .PHONY: clean
 clean:
-	rm -f $(BINARY) coverage.out coverage.html
+	rm -f $(BINARY) coverage.out coverage.html preview.txt
 
 ## check: Run fmt-check, lint, vet, test-race (CI entrypoint)
 .PHONY: check

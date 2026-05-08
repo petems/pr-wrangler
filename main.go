@@ -23,6 +23,9 @@ func main() {
 		case "auth":
 			runAuth(os.Args[2:])
 			return
+		case "demo":
+			runDemo(os.Args[2:])
+			return
 		case "version", "--version", "-v":
 			fmt.Println("pr-wrangler v0.1.0")
 			return
@@ -43,8 +46,51 @@ Usage:
   pr-wrangler auth login   Authenticate with GitHub (device flow)
   pr-wrangler auth status  Show current auth status
   pr-wrangler auth logout  Remove stored credentials
+  pr-wrangler demo         Launch the TUI with mock data (no auth required)
+  pr-wrangler demo --render  Render one frame of the demo TUI to stdout
   pr-wrangler help         Show this help
   pr-wrangler version      Show version`)
+}
+
+func runDemo(args []string) {
+	render := false
+	for _, a := range args {
+		switch a {
+		case "--render", "-r":
+			render = true
+		case "--help", "-h":
+			fmt.Println(`pr-wrangler demo — preview the TUI with mock data
+
+Usage:
+  pr-wrangler demo            Launch the interactive TUI populated with mock data
+  pr-wrangler demo --render   Render a single TUI frame (with ANSI colour) to stdout
+  pr-wrangler demo -r         Alias for --render`)
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown demo flag: %s\n", a)
+			fmt.Fprintln(os.Stderr, "Available: --render, -r, --help, -h")
+			os.Exit(1)
+		}
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	m := tui.NewDemoModel(cfg)
+
+	if render {
+		fmt.Println(m.View().Content)
+		return
+	}
+
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error running program: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func runAuth(args []string) {
