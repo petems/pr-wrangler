@@ -24,6 +24,7 @@ type Config struct {
 	AgentCommands      map[string]string `yaml:"agent_commands"`
 	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
 	ColorScheme        string            `yaml:"color_scheme,omitempty"`
+	ShowTmuxBanner     bool              `yaml:"show_tmux_banner"`
 
 	// Path is the file path consulted during Load. Set even when the file
 	// does not exist (in which case Loaded is false). Not serialized.
@@ -39,6 +40,7 @@ func DefaultConfig() Config {
 		RepoBaseDir:        filepath.Join(home, "projects"),
 		ServiceLabelPrefix: "service:",
 		ColorScheme:        "default",
+		ShowTmuxBanner:     true,
 		AgentCommands: map[string]string{
 			"fix-ci":            "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate the failing checks, identify the root cause, and fix the issues.'",
 			"address-feedback":  "claude --permission-mode acceptEdits 'This PR has review feedback that needs to be addressed: {{pr_url}} - Read the review comments and make the requested changes.'",
@@ -103,7 +105,13 @@ func LoadFromPath(path string) (Config, error) {
 		return Config{}, fmt.Errorf("reading config: %w", err)
 	}
 
-	var cfg Config
+	// Pre-seed only ShowTmuxBanner so a missing `show_tmux_banner` key in an
+	// existing config file inherits the default of true — yaml.v3 leaves
+	// fields untouched when their key is absent. We deliberately do NOT seed
+	// the whole DefaultConfig() here: yaml.v3 merges sequences/maps into
+	// non-nil destinations, which would reintroduce default agent_commands
+	// entries even when the user has trimmed or cleared the map.
+	cfg := Config{ShowTmuxBanner: true}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
 	}

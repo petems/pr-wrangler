@@ -327,6 +327,11 @@ func (m Model) viewContent() string {
 
 	b.WriteString(m.buildHelpLine())
 
+	if m.shouldShowTmuxBanner() {
+		b.WriteString("\n")
+		b.WriteString(m.renderTmuxBanner())
+	}
+
 	if m.showHelp {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderHelp())
@@ -338,6 +343,86 @@ func (m Model) viewContent() string {
 	}
 
 	return b.String()
+}
+
+// shouldShowTmuxBanner reports whether the bottom-of-screen tmux banner
+// should be rendered. It requires both the user's config opt-in and the
+// process to actually be running inside a tmux session.
+func (m Model) shouldShowTmuxBanner() bool {
+	if m.sessionMgr == nil {
+		return false
+	}
+	return m.sessionMgr.InsideTmux() && m.config.ShowTmuxBanner
+}
+
+// tmuxBannerLines is the visible row count of the rendered tmux banner
+// (separator + info line + a leading newline written by viewContent).
+const tmuxBannerLines = 3
+
+// renderTmuxBanner returns a two-line banner reminding the user they're
+// inside tmux: a labelled separator followed by view name, selected PR,
+// and the detach hint.
+func (m Model) renderTmuxBanner() string {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+
+	const label = "PR Wrangler"
+	separator := buildTmuxBannerSeparator(label, width)
+
+	viewName := "(no view)"
+	if len(m.config.Views) > 0 {
+		viewName = m.config.Views[0].Name
+	}
+
+	prInfo := tmuxBannerPRInfo(m)
+
+	parts := []string{viewName, prInfo, "Ctrl+B D to detach"}
+	// Truncate to terminal width so a long view name, repo, or a narrow
+	// terminal can't make the info line wrap onto a third row — the page
+	// sizer only reserves tmuxBannerLines rows, and any overflow would
+	// push the help/footer off-screen.
+	infoLine := truncateAnsi(strings.Join(parts, " | "), width)
+
+	return m.styles.TmuxBanner.Render(separator) + "\n" +
+		m.styles.TmuxBanner.Render(infoLine)
+}
+
+// tmuxBannerPRInfo returns "repo#number" for the current selection, or a
+// status placeholder when nothing is selected (loading or empty list).
+func tmuxBannerPRInfo(m Model) string {
+	if m.loading && len(m.rows) == 0 {
+		return "loading…"
+	}
+	if len(m.rows) == 0 {
+		return "(no PRs)"
+	}
+	if m.selected < 0 || m.selected >= len(m.rows) {
+		return "(no selection)"
+	}
+	r := m.rows[m.selected]
+	repo := extractRepoName(r.PR.RepoNameWithOwner)
+	if repo == "" {
+		return fmt.Sprintf("#%d", r.PR.Number)
+	}
+	return fmt.Sprintf("%s#%d", repo, r.PR.Number)
+}
+
+// buildTmuxBannerSeparator produces a horizontal rule like
+// "──────────  PR Wrangler  ──────────" that fits the given width.
+func buildTmuxBannerSeparator(label string, width int) string {
+	const dash = "─"
+	wrapped := "  " + label + "  "
+	pad := width - lipgloss.Width(wrapped)
+	if pad < 4 {
+		// Not enough room for a meaningful separator; emit just the label
+		// padded with a couple of dashes on each side.
+		return dash + dash + wrapped + dash + dash
+	}
+	left := pad / 2
+	right := pad - left
+	return strings.Repeat(dash, left) + wrapped + strings.Repeat(dash, right)
 }
 
 // loadingTitle is the block-letter banner shown above the cowsay during loading.
@@ -610,10 +695,21 @@ func (m Model) titleColumnWidth() int {
 // terminal height, leaving room for title, table header/footer, and the
 // help line.
 func (m Model) tablePageSize() int {
-	if m.height <= tableChromeLines+minPageSize {
+	chrome := m.effectiveTableChromeLines()
+	if m.height <= chrome+minPageSize {
 		return minPageSize
 	}
-	return m.height - tableChromeLines
+	return m.height - chrome
+}
+
+// effectiveTableChromeLines returns the non-table row count, including
+// extra rows reserved for the tmux banner when it's visible.
+func (m Model) effectiveTableChromeLines() int {
+	chrome := tableChromeLines
+	if m.shouldShowTmuxBanner() {
+		chrome += tmuxBannerLines
+	}
+	return chrome
 }
 
 // columnWidths returns the per-column widths in column order.

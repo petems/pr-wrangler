@@ -81,6 +81,7 @@ type Styles struct {
 	HelpCategory lipgloss.Style
 	SelectedRow  lipgloss.Style
 	Indicator    lipgloss.Style
+	TmuxBanner   lipgloss.Style
 }
 
 // NewStyles builds a Styles for the named color scheme. Unknown names fall
@@ -118,5 +119,7 @@ func NewStyles(name string) Styles {
 		Indicator: lipgloss.NewStyle().
 			Foreground(scheme.Primary).
 			Bold(true),
+		TmuxBanner: lipgloss.NewStyle().
+			Foreground(scheme.Secondary),
 	}
 }
