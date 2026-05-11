@@ -166,24 +166,51 @@ jobs:
       - name: Capture demo render
         run: ./pr-wrangler demo --render > preview.txt
 
-      - name: Upload preview artifact
+      - name: Install freeze
+        run: go install github.com/charmbracelet/freeze@latest
+
+      - name: Render preview to PNG and SVG
+        run: |
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.png preview.txt
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.svg preview.txt
+
+      - name: Render animated demo with VHS
+        uses: charmbracelet/vhs-action@v2
+        with:
+          path: demo.tape
+          install-fonts: 'true'
+
+      - name: Upload preview artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ui-preview
-          path: preview.txt
+          path: |
+            preview.txt
+            preview.png
+            preview.svg
+            demo.gif
 
+      # Skip on forks: GitHub downgrades GITHUB_TOKEN to read-only for
+      # pull_request runs from a forked head repo, so issues:write is
+      # ignored and createComment/updateComment 403s. The artifacts above
+      # are still uploaded for fork PRs — reviewers can pull them from the
+      # workflow run page.
       - name: Post or update PR preview comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         uses: actions/github-script@v8
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
             const marker = '<!-- pr-wrangler:ui-preview -->';
             const preview = fs.readFileSync('preview.txt', 'utf8');
+            const runUrl = process.env.RUN_URL;
             const body = [
               marker,
               '## 🖥️ UI Preview',
               '',
-              '_Auto-generated render of `pr-wrangler demo --render` for this PR. ANSI colour codes render best in terminals or in GitHub\'s `ansi` code block._',
+              `_Auto-generated render of \`pr-wrangler demo --render\` for this PR. The PNG/SVG/GIF assets are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
               '',
               '```ansi',
               preview,

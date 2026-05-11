@@ -5,3 +5,9 @@ coverage.html
 repomix.xml
 .claude/
 node_modules/
+
+# Generated demo artifacts
+preview.txt
+preview.png
+preview.svg
+demo.gif

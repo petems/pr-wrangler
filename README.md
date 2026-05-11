@@ -78,27 +78,52 @@ pr-wrangler demo --render   # render one frame to stdout (ANSI colour codes pres
 pr-wrangler demo -r         # short form of --render
 ```
 
-For convenience the Makefile exposes the same flows:
+For convenience the Makefile exposes the same flows plus image and animation capture:
 
 ```bash
 make preview          # builds the binary and runs `pr-wrangler demo --render`
 make preview-capture  # writes the rendered frame to preview.txt
+make preview-image    # renders preview.png and preview.svg via freeze
+make preview-gif      # renders demo.gif via VHS (uses demo.tape)
+make preview-all      # all of the above in one shot
+```
+
+`preview-image` and `preview-gif` shell out to two charmbracelet tools that you can install ahead of time:
+
+```bash
+go install github.com/charmbracelet/freeze@latest
+go install github.com/charmbracelet/vhs@latest
+# or, on macOS:  brew install charmbracelet/tap/freeze vhs
 ```
 
 The mock data covers a representative slice of states: open/draft PRs, passing/failing/pending CI, approved/changes-requested/commented reviews, mergeable/conflicting branches, and SAML-protected placeholders.
+
+### Capturing screenshots and GIFs
+
+There are three complementary capture flows, all driven by the same demo binary:
+
+| Output | How | When to use |
+|---|---|---|
+| `preview.txt` | `pr-wrangler demo --render > preview.txt` | Fast text snapshot for diffs, PR comments, and agentic flows that consume ANSI directly. |
+| `preview.png` / `preview.svg` | `make preview-image` (uses [`freeze`](https://github.com/charmbracelet/freeze)) | README hero images, blog posts, talk slides — anywhere a static image renders better than ANSI. |
+| `demo.gif` | `make preview-gif` (uses [`vhs`](https://github.com/charmbracelet/vhs) with `demo.tape`) | Animated walkthrough for the README header and onboarding docs. |
+
+Agents (Claude Code, Codex, etc.) can run any of the targets above and read the resulting files directly — `preview.png` is most reliable for visual verification because no ANSI-aware rendering is required.
 
 ## PR Preview Comments
 
 The CI pipeline includes a `UI Preview` job that runs on every pull request. It:
 
 1. Builds `pr-wrangler` from the PR branch.
-2. Runs `pr-wrangler demo --render` to capture an ANSI snapshot of the TUI.
-3. Uploads the snapshot as a workflow artifact (`ui-preview`).
-4. Posts (or updates) a comment on the PR with the snapshot wrapped in an `ansi` code block under a `## 🖥️ UI Preview` header.
+2. Runs `pr-wrangler demo --render` to capture `preview.txt`.
+3. Pipes that snapshot through `freeze` to produce `preview.png` and `preview.svg`.
+4. Renders `demo.tape` through [`charmbracelet/vhs-action`](https://github.com/charmbracelet/vhs-action) to produce `demo.gif`.
+5. Uploads `preview.txt`, `preview.png`, `preview.svg`, and `demo.gif` as the `ui-preview` workflow artifact.
+6. Posts (or updates) a comment on the PR with the ANSI snapshot wrapped in an `ansi` fenced code block, plus a link to the workflow run where the image/animation artifacts live.
 
 The comment is keyed by a hidden marker (`<!-- pr-wrangler:ui-preview -->`), so subsequent pushes update the existing comment instead of creating duplicates.
 
-The preview captures ANSI colour codes — GitHub's `ansi` fenced-code rendering will colour the snapshot, and the raw `preview.txt` artifact can be `cat`'d in any colour-capable terminal for a faithful reproduction. Any UI change you make on a PR will surface in the comment automatically, which makes review of styling tweaks much easier.
+**Forked PRs**: GitHub downgrades `GITHUB_TOKEN` to read-only on `pull_request` runs from a forked head repo, so the comment step is gated with `if: github.event.pull_request.head.repo.full_name == github.repository`. Artifacts are still uploaded for fork PRs — reviewers can fetch them from the workflow run page even when the auto-comment is skipped.
 
 ## Repository Layout
 
