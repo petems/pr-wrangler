@@ -234,15 +234,30 @@ jobs:
           script: |
             const fs = require('fs');
             const marker = '<!-- pr-wrangler:ui-preview -->';
-            const preview = fs.readFileSync('preview.txt', 'utf8');
             const runUrl = process.env.RUN_URL;
+
+            // GitHub's `ansi` fenced code block renders SGR colour
+            // sequences but does NOT understand OSC 8 hyperlinks
+            // (\x1b]8;;URL\x07...\x1b]8;;\x07), and any unrecognised
+            // ESC byte renders as a `@`-shaped replacement glyph.
+            // pr-wrangler's table cells contain OSC 8 hyperlinks, so
+            // we strip all ANSI before embedding and rely on the
+            // PNG/SVG/GIF artifacts (linked below) for the coloured
+            // version.
+            const stripAnsi = (s) => s
+              .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC, BEL-terminated
+              .replace(/\x1b\][^\x1b]*\x1b\\/g, '')     // OSC, ST-terminated
+              .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');   // CSI (SGR etc.)
+            const preview = stripAnsi(fs.readFileSync('preview.txt', 'utf8'));
+
             const body = [
               marker,
               '## 🖥️ UI Preview',
               '',
-              `_Auto-generated render of \`pr-wrangler demo --render\` for this PR. The PNG/SVG/GIF assets are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
+              `_Auto-generated render of \`pr-wrangler demo --render\` for this PR._`,
+              `_The full-colour PNG, SVG, and animated GIF are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
               '',
-              '```ansi',
+              '```',
               preview,
               '```',
             ].join('\n');
