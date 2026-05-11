@@ -169,7 +169,11 @@ jobs:
         run: ./pr-wrangler demo --render > preview.txt
 
       - name: Install freeze
-        run: go install github.com/charmbracelet/freeze@latest
+        # Pinned for reproducible preview output. Bump deliberately
+        # rather than tracking @latest, which would let a freeze
+        # release silently change the rendered PR comment/image.
+        # Available versions: https://github.com/charmbracelet/freeze/releases
+        run: go install github.com/charmbracelet/freeze@v0.2.2
 
       - name: Render preview to PNG and SVG
         # freeze's documented ANSI usage is stdin-based
