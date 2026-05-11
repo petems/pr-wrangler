@@ -188,11 +188,11 @@ jobs:
 
       - name: Install VHS and dependencies
         # Don't use charmbracelet/vhs-action@v2 — its internal "Installing
-        # latest ffmpeg..." step fails on the ubuntu-latest runner (ffmpeg
-        # is already pre-installed and the action's reinstall logic errored
-        # with "Failed to install ffmpeg"). Provisioning manually mirrors
-        # the freeze pinned-install pattern and keeps everything explicit:
-        #   - ffmpeg:           pre-installed on ubuntu-latest
+        # latest ffmpeg..." step fails on the ubuntu-latest runner with
+        # "Failed to install ffmpeg" (ffmpeg is no longer in the runner
+        # image's default toolset). Provisioning manually mirrors the
+        # freeze pinned-install pattern and keeps everything explicit:
+        #   - ffmpeg:           apt
         #   - ttyd:             apt (universe)
         #   - fonts-liberation: apt (replaces vhs-action's install-fonts)
         #   - vhs:              go install at pinned version
@@ -200,7 +200,7 @@ jobs:
         # Releases: https://github.com/charmbracelet/vhs/releases
         run: |
           sudo apt-get update
-          sudo apt-get install -y ttyd fonts-liberation
+          sudo apt-get install -y ffmpeg ttyd fonts-liberation
           go install github.com/charmbracelet/vhs@v0.11.0
 
       - name: Render animated demo with VHS
