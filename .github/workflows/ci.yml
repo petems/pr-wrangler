@@ -172,9 +172,15 @@ jobs:
         run: go install github.com/charmbracelet/freeze@latest
 
       - name: Render preview to PNG and SVG
+        # freeze's documented ANSI usage is stdin-based
+        # (`cat file | freeze --language ansi -o out.png`). Passing the
+        # input file positionally works locally but errored with
+        # "No input / check --lines is within bounds" on the runner, so
+        # redirect stdin from preview.txt to match the docs and avoid the
+        # ambiguous positional-vs-stdin code path inside freeze.
         run: |
-          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.png preview.txt
-          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.svg preview.txt
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.png < preview.txt
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.svg < preview.txt
 
       - name: Render animated demo with VHS
         uses: charmbracelet/vhs-action@v2

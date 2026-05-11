@@ -111,8 +111,8 @@ preview-image: preview-capture
 	  echo "  # or: brew install charmbracelet/tap/freeze"; \
 	  exit 1; \
 	}
-	freeze --language ansi --output preview.png preview.txt
-	freeze --language ansi --output preview.svg preview.txt
+	freeze --language ansi --output preview.png < preview.txt
+	freeze --language ansi --output preview.svg < preview.txt
 	@echo "Wrote preview.png and preview.svg"
 
 ## preview-gif: Render an animated demo to demo.gif via VHS (uses demo.tape)
