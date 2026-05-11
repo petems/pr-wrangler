@@ -91,10 +91,50 @@ tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
 
+## preview: Render one frame of the demo TUI to stdout (ANSI colour)
+.PHONY: preview
+preview: build
+	./$(BINARY) demo --render
+
+## preview-capture: Render the demo TUI and write to preview.txt
+.PHONY: preview-capture
+preview-capture: build
+	./$(BINARY) demo --render > preview.txt
+	@echo "Wrote preview.txt ($$(wc -l < preview.txt) lines)"
+
+## preview-image: Render the demo TUI to preview.png and preview.svg via freeze
+.PHONY: preview-image
+preview-image: preview-capture
+	@command -v freeze >/dev/null 2>&1 || { \
+	  echo "freeze not found. Install with:"; \
+	  echo "  go install github.com/charmbracelet/freeze@latest"; \
+	  echo "  # or: brew install charmbracelet/tap/freeze"; \
+	  exit 1; \
+	}
+	freeze --language ansi --output preview.png < preview.txt
+	freeze --language ansi --output preview.svg < preview.txt
+	@echo "Wrote preview.png and preview.svg"
+
+## preview-gif: Render an animated demo to demo.gif via VHS (uses demo.tape)
+.PHONY: preview-gif
+preview-gif: build
+	@command -v vhs >/dev/null 2>&1 || { \
+	  echo "vhs not found. Install with:"; \
+	  echo "  go install github.com/charmbracelet/vhs@latest"; \
+	  echo "  # or: brew install vhs"; \
+	  exit 1; \
+	}
+	vhs demo.tape
+	@echo "Wrote demo.gif"
+
+## preview-all: Generate every demo artifact (txt + png + svg + gif)
+.PHONY: preview-all
+preview-all: preview-capture preview-image preview-gif
+
 ## clean: Remove build artifacts
 .PHONY: clean
 clean:
-	rm -f $(BINARY) coverage.out coverage.html
+	rm -f $(BINARY) coverage.out coverage.html preview.txt preview.png preview.svg demo.gif
 
 ## check: Run fmt-check, lint, vet, test-race (CI entrypoint)
 .PHONY: check

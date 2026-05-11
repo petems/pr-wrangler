@@ -35,6 +35,41 @@ Use short, imperative commit subjects such as `Add worktree setup for PR session
 ## Configuration & Environment Tips
 The app depends on local `git`, `tmux`, and GitHub CLI-compatible access through the configured runner. Avoid hardcoding machine-specific paths; use config-driven repo locations and session storage paths.
 
+## Agentic UI/UX Validation
+
+When you change anything that affects what the TUI looks like — styles, table layout, key handling, status/action labels, the loading screen, the help overlay, the theme picker, or any new visual affordance — you must validate it visually as well as programmatically. The demo mode exists exactly for this.
+
+**Programmatic validation** (always do this first):
+
+```bash
+make check        # fmt-check + lint + vet + test-race
+```
+
+**Visual validation** — pick the capture format that matches the change:
+
+| Capture | Command | Use it for |
+|---|---|---|
+| `preview.txt` (ANSI text) | `make preview-capture` | Quick diffing, regression tracking, anything where ANSI escape sequences are the source of truth. |
+| `preview.png` (still image) | `make preview-image` | Layout, alignment, colour palette, table column widths, overlay positioning — anywhere a still frame conveys the change. |
+| `demo.gif` (animated) | `make preview-gif` | Anything time-based: spinner behaviour, progress bar, theme picker selection flow, key-driven state transitions. |
+| `make preview-all` | runs all three | Substantial UI changes where you want every artifact in one shot. |
+
+The `preview-image` and `preview-gif` targets shell out to [`freeze`](https://github.com/charmbracelet/freeze) and [`vhs`](https://github.com/charmbracelet/vhs) respectively. If they're not installed, the targets fail fast with the install hint:
+
+```bash
+go install github.com/charmbracelet/freeze@latest
+go install github.com/charmbracelet/vhs@latest
+```
+
+**For agents (Claude Code, Codex, Cursor, etc.):**
+
+1. Run `make preview-image` and read the resulting `preview.png` directly — your multimodal Read tool will render it as an image, which is the most reliable way to verify visual output without an ANSI-aware terminal.
+2. For interaction-driven changes, edit `demo.tape` to exercise the new flow, then run `make preview-gif` and inspect `demo.gif` (or extract a specific frame with `ffmpeg -i demo.gif -vf "select=eq(n\,N)" -vframes 1 frame.png`).
+3. Keep the demo data honest. If you add a new PR status, action, or row type, extend the mock fixtures in `internal/tui/mockdata.go` so the demo continues to exercise every branch of the renderer.
+4. CI runs the same capture pipeline on every PR and posts the ANSI snapshot back as a comment (with PNG/SVG/GIF attached as artifacts), so your local previews and the PR review surface should match.
+
+**Reporting back to the user**: if you're claiming a UI change works, attach or reference the captured artifact rather than describing it in prose — "preview.png shows the new column rendering correctly at 140 cols" is verifiable; "I added the column" is not.
+
 ## Cursor Cloud specific instructions
 
 **Runtime dependencies**: Go 1.25+, `tmux`, and `git` are pre-installed. `golangci-lint` is installed to `$HOME/go/bin` via the update script; `$HOME/go/bin` is already on `PATH` via `~/.bashrc`.

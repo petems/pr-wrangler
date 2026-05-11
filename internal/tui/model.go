@@ -75,6 +75,11 @@ type Model struct {
 	// SAML errors for PRs that couldn't be fetched, ordered by original
 	// search-result position so they can be interleaved with the PR list.
 	samlErrors []github.SAMLErrorEntry
+
+	// demoMode is true when the model was constructed with NewDemoModel.
+	// Used to skip network/tmux side-effects in Init and key handlers so the
+	// demo can run with nil ghClient/sessionMgr/sessionStore.
+	demoMode bool
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
@@ -96,7 +101,45 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 	}
 }
 
+// NewDemoModel builds a Model populated entirely from mock data so the TUI
+// can be previewed locally or rendered to ASCII without any GitHub or tmux
+// dependencies. ghClient, sessionMgr, and sessionStore are intentionally nil:
+// any keypress that exercises a network/tmux code path will no-op or surface
+// a non-fatal error in the demo, which is acceptable for a preview.
+func NewDemoModel(cfg config.Config) Model {
+	styles := NewStyles(cfg.ColorScheme)
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = styles.Loading
+
+	prs := MockPRs()
+	samlErrors := MockSAMLErrors()
+	rows := buildRows(prs, samlErrors)
+
+	return Model{
+		config:     cfg,
+		styles:     styles,
+		loading:    false,
+		spinner:    s,
+		width:      140,
+		height:     40,
+		allRows:    rows,
+		rows:       rows,
+		samlErrors: samlErrors,
+		prSessions: MockPRSessions(),
+		demoMode:   true,
+	}
+}
+
 func (m Model) Init() tea.Cmd {
+	if m.demoMode {
+		// No spinner tick needed: demo mode skips the loading screen
+		// (loading=false, rows pre-populated) and the dashboard view
+		// doesn't render the spinner. Returning nil avoids a perpetual
+		// background tick that produces no visible output.
+		return nil
+	}
 	return tea.Batch(
 		m.spinner.Tick,
 		m.refreshCmd(),
@@ -140,11 +183,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "r":
+			if m.demoMode {
+				m.notification = "demo mode: refresh is disabled"
+				return m, nil
+			}
 			m.loading = true
 			return m, m.refreshCmd()
 		case "?":
 			m.showHelp = !m.showHelp
 		case "enter", "c":
+			if m.demoMode {
+				m.notification = "demo mode: tmux session creation is disabled"
+				return m, nil
+			}
 			return m, m.switchToSession()
 		case "o":
 			return m, m.openSelectedPR()

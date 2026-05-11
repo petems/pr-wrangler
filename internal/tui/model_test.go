@@ -662,6 +662,108 @@ func TestTablePageSize(t *testing.T) {
 	}
 }
 
+// --- demo mode ---
+
+// runCmdAndDrain executes a tea.Cmd and, if the resulting message is a
+// tea.BatchMsg, recursively runs every nested Cmd. Without this, a single
+// cmd() call returns the BatchMsg envelope but never executes its members,
+// which would let a nil-deref panic in a sub-Cmd slip past
+// TestNewDemoModel_InitAndKeypressesDoNotPanic.
+func runCmdAndDrain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, nested := range batch {
+			runCmdAndDrain(nested)
+		}
+	}
+}
+
+// TestNewDemoModel_InitAndKeypressesDoNotPanic is the regression test for the
+// nil-pointer panic in fetchPRsCmd when Init() ran refreshCmd() against the
+// demo model's nil *github.GHClient. The earlier test suite called Update()
+// on hand-built Model literals but never exercised the demo construction
+// path, so the panic only surfaced at program start.
+//
+// This test runs every keypress that previously dispatched a Cmd against
+// ghClient/sessionMgr/sessionStore (refresh, session switch, navigation),
+// then drains every returned Cmd (including BatchMsg members) so any nil
+// deref reintroduced in that path triggers a goroutine panic the runtime
+// surfaces as a test failure.
+func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig())
+
+	if m.ghClient != nil || m.sessionMgr != nil || m.sessionStore != nil {
+		t.Fatalf("demo model should leave clients nil, got ghClient=%v sessionMgr=%v sessionStore=%v",
+			m.ghClient, m.sessionMgr, m.sessionStore)
+	}
+	if !m.demoMode {
+		t.Fatal("demo model should set demoMode=true")
+	}
+	if len(m.rows) == 0 {
+		t.Fatal("demo model should have populated rows")
+	}
+
+	// Init() must not return any Cmd that, when executed (or whose batched
+	// sub-Cmds are executed), hits the nil ghClient/sessionMgr.
+	runCmdAndDrain(m.Init())
+
+	// These keypresses previously dispatched commands that dereferenced
+	// nil clients. With the demo guards in place each must be a safe no-op
+	// or surface a notification. Construct the Enter key explicitly via
+	// tea.KeyEnter — otherwise tea.Key{Code: rune("enter"[0])} would send
+	// 'e' and the actual enter handler would never be exercised.
+	presses := []tea.KeyPressMsg{
+		tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}),
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}),
+		tea.KeyPressMsg(tea.Key{Text: "c", Code: 'c'}),
+		tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}),
+		tea.KeyPressMsg(tea.Key{Text: "k", Code: 'k'}),
+		tea.KeyPressMsg(tea.Key{Text: "?", Code: '?'}),
+		tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}),
+		tea.KeyPressMsg(tea.Key{Text: "o", Code: 'o'}),
+	}
+	for _, press := range presses {
+		updated, cmd := m.Update(press)
+		next, ok := updated.(Model)
+		if !ok {
+			t.Fatalf("press %+v: Update returned %T, want Model", press, updated)
+		}
+		m = next
+		runCmdAndDrain(cmd)
+	}
+}
+
+// TestDemoModel_RefreshIsNoOp guards against accidentally re-enabling the
+// network refresh path in demo mode. Pressing 'r' must not flip loading=true
+// (which would hide the populated rows behind the cowsay loading screen) or
+// dispatch a fetch command.
+func TestDemoModel_RefreshIsNoOp(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig())
+	rowsBefore := len(m.rows)
+
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.loading {
+		t.Error("demo refresh must not flip loading=true")
+	}
+	if len(next.rows) != rowsBefore {
+		t.Errorf("rows changed unexpectedly: before=%d after=%d", rowsBefore, len(next.rows))
+	}
+	if next.notification == "" {
+		t.Error("demo refresh should set a notification explaining it's disabled")
+	}
+	if cmd != nil {
+		t.Fatalf("demo refresh must return a nil Cmd; got %T", cmd)
+	}
+}
+
 // stripANSI removes ANSI escape sequences for measuring visible width.
 // Handles both SGR-style CSI sequences (ESC [ ... <letter>) and OSC sequences
 // such as OSC 8 hyperlinks (ESC ] ... ESC \ or BEL terminator). The latter is

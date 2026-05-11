@@ -141,3 +141,143 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum || (echo "go.mod or go.sum needs updating" && exit 1)
           go mod verify
+
+  preview:
+    name: UI Preview
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Both issues:write AND pull-requests:write are required in practice
+      # to POST /repos/{owner}/{repo}/issues/{issue_number}/comments on a
+      # PR. GitHub returned 403 "Resource not accessible by integration"
+      # with `x-accepted-github-permissions: issues=write; pull_requests=
+      # write` when only issues:write was set, so keep both.
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: Build binary
+        run: make build
+
+      - name: Capture demo render
+        run: ./pr-wrangler demo --render > preview.txt
+
+      - name: Install freeze
+        # Pinned for reproducible preview output. Bump deliberately
+        # rather than tracking @latest, which would let a freeze
+        # release silently change the rendered PR comment/image.
+        # Available versions: https://github.com/charmbracelet/freeze/releases
+        run: go install github.com/charmbracelet/freeze@v0.2.2
+
+      - name: Render preview to PNG and SVG
+        # freeze's documented ANSI usage is stdin-based
+        # (`cat file | freeze --language ansi -o out.png`). Passing the
+        # input file positionally works locally but errored with
+        # "No input / check --lines is within bounds" on the runner, so
+        # redirect stdin from preview.txt to match the docs and avoid the
+        # ambiguous positional-vs-stdin code path inside freeze.
+        run: |
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.png < preview.txt
+          "$(go env GOPATH)/bin/freeze" --language ansi --output preview.svg < preview.txt
+
+      - name: Install VHS and dependencies
+        # Don't use charmbracelet/vhs-action@v2 — its internal "Installing
+        # latest ffmpeg..." step fails on the ubuntu-latest runner with
+        # "Failed to install ffmpeg" (ffmpeg is no longer in the runner
+        # image's default toolset). Provisioning manually mirrors the
+        # freeze pinned-install pattern and keeps everything explicit:
+        #   - ffmpeg:           apt
+        #   - ttyd:             apt (universe)
+        #   - fonts-liberation: apt (replaces vhs-action's install-fonts)
+        #   - vhs:              go install at pinned version
+        # Bump the vhs pin deliberately when needed.
+        # Releases: https://github.com/charmbracelet/vhs/releases
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg ttyd fonts-liberation
+          go install github.com/charmbracelet/vhs@v0.11.0
+
+      - name: Render animated demo with VHS
+        run: |
+          "$(go env GOPATH)/bin/vhs" demo.tape
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-preview
+          path: |
+            preview.txt
+            preview.png
+            preview.svg
+            demo.gif
+
+      # Skip on forks: GitHub downgrades GITHUB_TOKEN to read-only for
+      # pull_request runs from a forked head repo, so issues:write is
+      # ignored and createComment/updateComment 403s. The artifacts above
+      # are still uploaded for fork PRs — reviewers can pull them from the
+      # workflow run page.
+      - name: Post or update PR preview comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@v8
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- pr-wrangler:ui-preview -->';
+            const runUrl = process.env.RUN_URL;
+
+            // GitHub's `ansi` fenced code block renders SGR colour
+            // sequences but does NOT understand OSC 8 hyperlinks
+            // (\x1b]8;;URL\x07...\x1b]8;;\x07), and any unrecognised
+            // ESC byte renders as a `@`-shaped replacement glyph.
+            // pr-wrangler's table cells contain OSC 8 hyperlinks, so
+            // we strip all ANSI before embedding and rely on the
+            // PNG/SVG/GIF artifacts (linked below) for the coloured
+            // version.
+            const stripAnsi = (s) => s
+              .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC, BEL-terminated
+              .replace(/\x1b\][^\x1b]*\x1b\\/g, '')     // OSC, ST-terminated
+              .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');   // CSI (SGR etc.)
+            const preview = stripAnsi(fs.readFileSync('preview.txt', 'utf8'));
+
+            const body = [
+              marker,
+              '## 🖥️ UI Preview',
+              '',
+              `_Auto-generated render of \`pr-wrangler demo --render\` for this PR._`,
+              `_The full-colour PNG, SVG, and animated GIF are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
+              '',
+              '```',
+              preview,
+              '```',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+              core.info(`Updated preview comment ${existing.id}`);
+            } else {
+              const { data: created } = await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+              core.info(`Created preview comment ${created.id}`);
+            }
