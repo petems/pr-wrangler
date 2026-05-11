@@ -760,8 +760,7 @@ func TestDemoModel_RefreshIsNoOp(t *testing.T) {
 		t.Error("demo refresh should set a notification explaining it's disabled")
 	}
 	if cmd != nil {
-		// Should be nil; if not, executing must still not panic.
-		_ = cmd()
+		t.Fatalf("demo refresh must return a nil Cmd; got %T", cmd)
 	}
 }
 
