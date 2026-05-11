@@ -186,16 +186,26 @@ jobs:
           "$(go env GOPATH)/bin/freeze" --language ansi --output preview.png < preview.txt
           "$(go env GOPATH)/bin/freeze" --language ansi --output preview.svg < preview.txt
 
+      - name: Install VHS and dependencies
+        # Don't use charmbracelet/vhs-action@v2 — its internal "Installing
+        # latest ffmpeg..." step fails on the ubuntu-latest runner (ffmpeg
+        # is already pre-installed and the action's reinstall logic errored
+        # with "Failed to install ffmpeg"). Provisioning manually mirrors
+        # the freeze pinned-install pattern and keeps everything explicit:
+        #   - ffmpeg:           pre-installed on ubuntu-latest
+        #   - ttyd:             apt (universe)
+        #   - fonts-liberation: apt (replaces vhs-action's install-fonts)
+        #   - vhs:              go install at pinned version
+        # Bump the vhs pin deliberately when needed.
+        # Releases: https://github.com/charmbracelet/vhs/releases
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttyd fonts-liberation
+          go install github.com/charmbracelet/vhs@v0.11.0
+
       - name: Render animated demo with VHS
-        uses: charmbracelet/vhs-action@v2
-        with:
-          path: demo.tape
-          # Pin VHS for reproducible animation output — vhs-action's
-          # default of 'latest' would let a release silently change the
-          # rendered GIF. Bump deliberately when needed.
-          # Releases: https://github.com/charmbracelet/vhs/releases
-          version: v0.11.0
-          install-fonts: 'true'
+        run: |
+          "$(go env GOPATH)/bin/vhs" demo.tape
 
       - name: Upload preview artifacts
         uses: actions/upload-artifact@v7
