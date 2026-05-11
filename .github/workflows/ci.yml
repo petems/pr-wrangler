@@ -190,6 +190,11 @@ jobs:
         uses: charmbracelet/vhs-action@v2
         with:
           path: demo.tape
+          # Pin VHS for reproducible animation output — vhs-action's
+          # default of 'latest' would let a release silently change the
+          # rendered GIF. Bump deliberately when needed.
+          # Releases: https://github.com/charmbracelet/vhs/releases
+          version: v0.11.0
           install-fonts: 'true'
 
       - name: Upload preview artifacts
