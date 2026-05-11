@@ -664,6 +664,23 @@ func TestTablePageSize(t *testing.T) {
 
 // --- demo mode ---
 
+// runCmdAndDrain executes a tea.Cmd and, if the resulting message is a
+// tea.BatchMsg, recursively runs every nested Cmd. Without this, a single
+// cmd() call returns the BatchMsg envelope but never executes its members,
+// which would let a nil-deref panic in a sub-Cmd slip past
+// TestNewDemoModel_InitAndKeypressesDoNotPanic.
+func runCmdAndDrain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, nested := range batch {
+			runCmdAndDrain(nested)
+		}
+	}
+}
+
 // TestNewDemoModel_InitAndKeypressesDoNotPanic is the regression test for the
 // nil-pointer panic in fetchPRsCmd when Init() ran refreshCmd() against the
 // demo model's nil *github.GHClient. The earlier test suite called Update()
@@ -672,9 +689,9 @@ func TestTablePageSize(t *testing.T) {
 //
 // This test runs every keypress that previously dispatched a Cmd against
 // ghClient/sessionMgr/sessionStore (refresh, session switch, navigation),
-// then drains the Init()-returned Batch by invoking the underlying tea.Cmd.
-// Any nil deref reintroduced in that path will trigger a goroutine panic
-// the runtime surfaces as a test failure.
+// then drains every returned Cmd (including BatchMsg members) so any nil
+// deref reintroduced in that path triggers a goroutine panic the runtime
+// surfaces as a test failure.
 func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
 	m := NewDemoModel(config.DefaultConfig())
 
@@ -689,26 +706,33 @@ func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
 		t.Fatal("demo model should have populated rows")
 	}
 
-	// Init() must not return any Cmd that, when executed, hits the nil
-	// ghClient/sessionMgr.
-	if cmd := m.Init(); cmd != nil {
-		_ = cmd() // should not panic
-	}
+	// Init() must not return any Cmd that, when executed (or whose batched
+	// sub-Cmds are executed), hits the nil ghClient/sessionMgr.
+	runCmdAndDrain(m.Init())
 
 	// These keypresses previously dispatched commands that dereferenced
 	// nil clients. With the demo guards in place each must be a safe no-op
-	// or surface a notification/error message.
-	for _, key := range []string{"r", "enter", "c", "j", "k", "?", "a", "o"} {
-		press := tea.KeyPressMsg(tea.Key{Text: key, Code: rune(key[0])})
+	// or surface a notification. Construct the Enter key explicitly via
+	// tea.KeyEnter — otherwise tea.Key{Code: rune("enter"[0])} would send
+	// 'e' and the actual enter handler would never be exercised.
+	presses := []tea.KeyPressMsg{
+		tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}),
+		tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}),
+		tea.KeyPressMsg(tea.Key{Text: "c", Code: 'c'}),
+		tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}),
+		tea.KeyPressMsg(tea.Key{Text: "k", Code: 'k'}),
+		tea.KeyPressMsg(tea.Key{Text: "?", Code: '?'}),
+		tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}),
+		tea.KeyPressMsg(tea.Key{Text: "o", Code: 'o'}),
+	}
+	for _, press := range presses {
 		updated, cmd := m.Update(press)
 		next, ok := updated.(Model)
 		if !ok {
-			t.Fatalf("key %q: Update returned %T, want Model", key, updated)
+			t.Fatalf("press %+v: Update returned %T, want Model", press, updated)
 		}
 		m = next
-		if cmd != nil {
-			_ = cmd() // execute the returned Cmd to surface any nil deref
-		}
+		runCmdAndDrain(cmd)
 	}
 }
 

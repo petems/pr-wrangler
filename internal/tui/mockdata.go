@@ -1,11 +1,22 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/tmux"
 )
+
+// demoWorkDir builds a portable absolute path under the OS temp dir for use
+// in mock PRSession entries. Hardcoding /Users/... or other host-specific
+// roots is forbidden by AGENTS.md ("Avoid hardcoding machine-specific
+// paths"); the resulting path doesn't need to exist on disk — demo mode
+// never reads it.
+func demoWorkDir(parts ...string) string {
+	return filepath.Join(append([]string{os.TempDir(), "pr-wrangler-demo"}, parts...)...)
+}
 
 // MockPRs returns a fixed set of PRs covering a range of states so the demo
 // view exercises every status/action branch the TUI can render.
@@ -212,7 +223,7 @@ func MockPRSessions() map[int]tmux.PRSession {
 			SessionName: "pr-101-add-oauth-device-flow",
 			PRNumber:    101,
 			PRTitle:     "Add OAuth device flow for GitHub authentication",
-			WorkDir:     "/Users/demo/projects/pr-wrangler",
+			WorkDir:     demoWorkDir("projects", "pr-wrangler"),
 			Branch:      "feat/oauth-device-flow",
 			PRURL:       "https://github.com/petems/pr-wrangler/pull/101",
 		},
@@ -220,7 +231,7 @@ func MockPRSessions() map[int]tmux.PRSession {
 			SessionName: "pr-102-migrate-tui-to-charm-v2",
 			PRNumber:    102,
 			PRTitle:     "Migrate TUI to Charm v2 to fix OSC 8 hyperlink truncation",
-			WorkDir:     "/Users/demo/projects/pr-wrangler-worktrees/pr-102",
+			WorkDir:     demoWorkDir("projects", "pr-wrangler-worktrees", "pr-102"),
 			Branch:      "fix/charm-v2-migration",
 			PRURL:       "https://github.com/petems/pr-wrangler/pull/102",
 		},
@@ -228,7 +239,7 @@ func MockPRSessions() map[int]tmux.PRSession {
 			SessionName: "pr-104-add-real-time-colour-scheme",
 			PRNumber:    104,
 			PRTitle:     "Add real-time colour scheme switching with theme picker overlay",
-			WorkDir:     "/Users/demo/projects/pr-wrangler-worktrees/pr-104",
+			WorkDir:     demoWorkDir("projects", "pr-wrangler-worktrees", "pr-104"),
 			Branch:      "feat/theme-picker",
 			PRURL:       "https://github.com/petems/pr-wrangler/pull/104",
 		},

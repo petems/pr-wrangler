@@ -148,7 +148,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      # Only issues:write is required — the preview comment is posted via the
+      # Issues API (github.rest.issues.createComment / updateComment), which
+      # works for PR comments because PRs are issues under the hood.
       issues: write
     steps:
       - name: Checkout code

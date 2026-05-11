@@ -134,7 +134,11 @@ func NewDemoModel(cfg config.Config) Model {
 
 func (m Model) Init() tea.Cmd {
 	if m.demoMode {
-		return m.spinner.Tick
+		// No spinner tick needed: demo mode skips the loading screen
+		// (loading=false, rows pre-populated) and the dashboard view
+		// doesn't render the spinner. Returning nil avoids a perpetual
+		// background tick that produces no visible output.
+		return nil
 	}
 	return tea.Batch(
 		m.spinner.Tick,
@@ -188,6 +192,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = !m.showHelp
 		case "enter", "c":
+			if m.demoMode {
+				m.notification = "demo mode: tmux session creation is disabled"
+				return m, nil
+			}
 			return m, m.switchToSession()
 		case "o":
 			return m, m.openSelectedPR()
@@ -813,11 +821,6 @@ func (m *Model) openSAMLAuthURL() tea.Cmd {
 }
 
 func (m Model) switchToSession() tea.Cmd {
-	if m.demoMode {
-		return func() tea.Msg {
-			return sessionErrorMsg{err: fmt.Errorf("demo mode: tmux session creation is disabled")}
-		}
-	}
 	if m.selected < 0 || m.selected >= len(m.rows) {
 		return func() tea.Msg {
 			return sessionErrorMsg{err: fmt.Errorf("no PR selected")}
