@@ -148,10 +148,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Only issues:write is required — the preview comment is posted via the
-      # Issues API (github.rest.issues.createComment / updateComment), which
-      # works for PR comments because PRs are issues under the hood.
+      # Both issues:write AND pull-requests:write are required in practice
+      # to POST /repos/{owner}/{repo}/issues/{issue_number}/comments on a
+      # PR. GitHub returned 403 "Resource not accessible by integration"
+      # with `x-accepted-github-permissions: issues=write; pull_requests=
+      # write` when only issues:write was set, so keep both.
       issues: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
