@@ -38,7 +38,7 @@ The app depends on local `git`, `tmux`, and a GitHub API token. The token is res
 ## GitHub Integration
 The GitHub layer lives in `internal/github`:
 
-- `client.go` wraps `go-github` v72. `FetchPRs` runs the Search API once, then fans out up to 8 concurrent detail fetches (pull, reviews, check runs, combined status) and reassembles results in original search order so the UI ordering is stable.
+- `client.go` wraps `go-github` v72. `FetchPRs` runs the Search API once, then fans out up to 8 concurrent PR detail workers (each worker fetches its pull, reviews, check runs, and combined status sequentially) and reassembles results in original search order so the UI ordering is stable.
 - `device_flow.go` implements the OAuth device-flow handshake against `github.com/login/device/code` and `github.com/login/oauth/access_token`. No client secret is required; only a public OAuth App Client ID with "Device Flow" enabled.
 - `auth.go` stores `TokenInfo` at `~/.config/pr-wrangler/auth.json` with mode `0600`, and exposes `ResolveToken()` for the env-var → stored-token chain.
 - `SAMLAuthError` / `SAMLErrorEntry` represent 403 SAML failures. They are interleaved back into the PR list at their original index by the TUI so SAML-protected PRs stay in the right position rather than being silently dropped or appended.

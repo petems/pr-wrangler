@@ -106,7 +106,7 @@ Set `color_scheme` to one of the following values (default: `default`):
 
 ### Query warnings
 
-`pr-wrangler` warns when the configured search query has no `is:open`, `is:closed`, or `is:merged` qualifier — those queries can hit GitHub's 1000-result search cap and trip secondary rate limits. The effective query (`<your query> is:pr`) is shown above the table so you always see exactly what is being searched.
+`pr-wrangler` warns when the configured search query has no `is:open`, `is:closed`, or `is:merged` qualifier — those queries can hit GitHub's 1000-result search cap and trip secondary rate limits. The configured query is shown above the table on the main dashboard, while the effective query (`<your query> is:pr`) is shown on the loading screen so you can confirm exactly what is being searched.
 
 ## Demo Mode
 
@@ -178,7 +178,7 @@ The comment is keyed by a hidden marker (`<!-- pr-wrangler:ui-preview -->`), so 
 
 1. Resolve a GitHub token via the chain documented in [Authentication](#authentication).
 2. Run a single GitHub Search API call (`<query> is:pr`) to find candidate PRs.
-3. Fan out up to 8 concurrent `pulls`, `reviews`, `check-runs`, and combined-status fetches per PR; PRs are reassembled in the original `updated-desc` order.
+3. Fan out up to 8 concurrent PR detail workers (each worker fetches `pulls`, `reviews`, `check-runs`, and combined status sequentially); PRs are reassembled in the original `updated-desc` order.
 4. Detect 403 SAML errors (via `X-GitHub-SSO` header or known message body) and surface them inline as "SAML Auth Required" rows that can be authorized with `a`.
 5. Classify each PR (`DetermineStatus` → `DetermineAction` in `internal/github`).
 6. On `enter` / `c`, ensure a git worktree for the PR's head branch, then create or attach to a tmux session named after the PR, launching the configured agent command.
