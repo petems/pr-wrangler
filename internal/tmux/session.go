@@ -217,6 +217,36 @@ func (m *SessionManager) InsideTmux() bool {
 	return os.Getenv("TMUX") != ""
 }
 
+// IsTmuxInstalled probes whether the tmux binary is on PATH and runnable.
+// Returns the version string from `tmux -V` (e.g. "tmux 3.4") on success.
+// Used at startup to warn the user before they hit a confusing error from
+// new-session or set-option later.
+func (m *SessionManager) IsTmuxInstalled(ctx context.Context) (string, error) {
+	out, err := m.Runner.Run(ctx, "tmux", "-V")
+	if err != nil {
+		return "", fmt.Errorf("tmux is not installed or not on PATH: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// SetSessionStatusLeft sets the status-left option on a specific session.
+// The -t target scopes the change to this session only — other sessions
+// (including the user's main session) are unaffected because session options
+// have both global and per-session settings, and per-session values override
+// the global when present.
+//
+// status-left-length is raised to fit the typical "PR Wrangler ── repo#N"
+// banner; without that, tmux truncates the value to its default 10 columns.
+func (m *SessionManager) SetSessionStatusLeft(ctx context.Context, sessionName, content string) error {
+	if _, err := m.Runner.Run(ctx, "tmux", "set-option", "-t", sessionName, "status-left-length", "200"); err != nil {
+		return fmt.Errorf("setting status-left-length: %w", err)
+	}
+	if _, err := m.Runner.Run(ctx, "tmux", "set-option", "-t", sessionName, "status-left", content); err != nil {
+		return fmt.Errorf("setting status-left: %w", err)
+	}
+	return nil
+}
+
 // SwitchToSession switches to the given tmux session. If already inside tmux
 // it uses switch-client; otherwise it attaches to the session.
 func (m *SessionManager) SwitchToSession(ctx context.Context, sessionName string) error {

@@ -24,6 +24,7 @@ type Config struct {
 	AgentCommands      map[string]string `yaml:"agent_commands"`
 	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
 	ColorScheme        string            `yaml:"color_scheme,omitempty"`
+	ShowTmuxBanner     bool              `yaml:"show_tmux_banner"`
 
 	// Path is the file path consulted during Load. Set even when the file
 	// does not exist (in which case Loaded is false). Not serialized.
@@ -39,6 +40,7 @@ func DefaultConfig() Config {
 		RepoBaseDir:        filepath.Join(home, "projects"),
 		ServiceLabelPrefix: "service:",
 		ColorScheme:        "default",
+		ShowTmuxBanner:     true,
 		AgentCommands: map[string]string{
 			"fix-ci":            "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate the failing checks, identify the root cause, and fix the issues.'",
 			"address-feedback":  "claude --permission-mode acceptEdits 'This PR has review feedback that needs to be addressed: {{pr_url}} - Read the review comments and make the requested changes.'",
@@ -108,6 +110,13 @@ func LoadFromPath(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 
+	// Decode into a raw map to detect fields that were omitted from the
+	// file. Bool fields can't otherwise be distinguished from explicit
+	// false, so we use this to apply a default of true when the key is
+	// absent.
+	var raw map[string]any
+	_ = yaml.Unmarshal(data, &raw)
+
 	if len(cfg.Views) == 0 {
 		cfg.Views = DefaultConfig().Views
 	}
@@ -122,6 +131,9 @@ func LoadFromPath(path string) (Config, error) {
 	}
 	if cfg.ColorScheme == "" {
 		cfg.ColorScheme = DefaultConfig().ColorScheme
+	}
+	if _, ok := raw["show_tmux_banner"]; !ok {
+		cfg.ShowTmuxBanner = true
 	}
 
 	cfg.Path = path

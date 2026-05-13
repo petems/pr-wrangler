@@ -395,3 +395,84 @@ func TestRepoInfoFromPath(t *testing.T) {
 		})
 	}
 }
+
+// TestSetSessionStatusLeft verifies the tmux invocations are scoped per-session
+// via -t, that status-left-length is raised first so longer content isn't
+// truncated by tmux's default of 10 columns, and that the banner content is
+// passed through unmodified (tmux format escapes intact).
+func TestSetSessionStatusLeft(t *testing.T) {
+	runner := newMockRunner()
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	const sessionName = "fix-bug-42"
+	const content = "#[fg=cyan,bold]── PR Wrangler ── #[default]My PRs | repo#42 "
+
+	err := mgr.SetSessionStatusLeft(context.Background(), sessionName, content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(runner.calls) != 2 {
+		t.Fatalf("expected 2 tmux calls (length + value), got %d: %v", len(runner.calls), runner.calls)
+	}
+
+	wantLengthCall := []string{"tmux", "set-option", "-t", sessionName, "status-left-length", "200"}
+	wantValueCall := []string{"tmux", "set-option", "-t", sessionName, "status-left", content}
+
+	for i, want := range [][]string{wantLengthCall, wantValueCall} {
+		got := runner.calls[i]
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("call %d:\n got=%v\nwant=%v", i, got, want)
+		}
+	}
+}
+
+// TestSetSessionStatusLeft_LengthFailureSurfaces ensures we return the
+// underlying tmux error rather than silently swallowing it. Callers may
+// choose to suppress (ensureSessionCmd does) but the SessionManager method
+// must keep the error path honest for direct callers and tests.
+func TestSetSessionStatusLeft_LengthFailureSurfaces(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux set-option -t bad status-left-length 200", "", fmt.Errorf("no such session"))
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	err := mgr.SetSessionStatusLeft(context.Background(), "bad", "content")
+	if err == nil {
+		t.Fatal("expected error when status-left-length fails")
+	}
+	if len(runner.calls) != 1 {
+		t.Errorf("expected to stop after first failure, got %d calls", len(runner.calls))
+	}
+}
+
+// TestIsTmuxInstalled_Success verifies that `tmux -V` output is returned
+// as the detected version string when tmux is available.
+func TestIsTmuxInstalled_Success(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux -V", "tmux 3.4\n", nil)
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	got, err := mgr.IsTmuxInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != "tmux 3.4" {
+		t.Errorf("expected 'tmux 3.4', got %q", got)
+	}
+}
+
+// TestIsTmuxInstalled_Missing verifies that a runnable error (tmux not on
+// PATH) surfaces with a wrapping message the user can act on.
+func TestIsTmuxInstalled_Missing(t *testing.T) {
+	runner := newMockRunner()
+	runner.set("tmux -V", "", fmt.Errorf(`exec: "tmux": executable file not found in $PATH`))
+	mgr := NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	_, err := mgr.IsTmuxInstalled(context.Background())
+	if err == nil {
+		t.Fatal("expected error when tmux is missing")
+	}
+	if !strings.Contains(err.Error(), "tmux is not installed") {
+		t.Errorf("error should mention installation status, got: %v", err)
+	}
+}

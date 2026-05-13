@@ -326,10 +326,36 @@ func runTUI() {
 	homeDir, _ := os.UserHomeDir()
 	sessionMgr := tmux.NewSessionManager(&tmux.ExecRunner{}, homeDir, cfg.RepoBaseDir)
 
+	// Validate tmux availability up-front. pr-wrangler can't open PR sessions
+	// without it, so a missing binary should surface as a clear startup
+	// warning rather than as a confusing error when the user later presses
+	// Enter on a row. Surfaced both on stderr (visible before AltScreen takes
+	// over) and as an in-TUI notification (visible once it loads).
+	tmuxNotice := ""
+	tmuxCtx, tmuxCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if version, err := sessionMgr.IsTmuxInstalled(tmuxCtx); err != nil {
+		tmuxNotice = "tmux not found; pull-request sessions will not launch"
+		fmt.Fprintln(os.Stderr, "Warning: tmux is not installed or not on PATH.")
+		fmt.Fprintln(os.Stderr, "  pr-wrangler needs tmux to open per-PR sessions. Install with:")
+		fmt.Fprintln(os.Stderr, "    macOS:    brew install tmux")
+		fmt.Fprintln(os.Stderr, "    Debian:   sudo apt-get install tmux")
+		fmt.Fprintln(os.Stderr)
+	} else if !sessionMgr.InsideTmux() {
+		tmuxNotice = fmt.Sprintf("%s detected, but pr-wrangler is not inside tmux — run inside a tmux session for the footer banner and smooth switching.", version)
+		fmt.Fprintf(os.Stderr, "Note: %s detected, but pr-wrangler is not running inside tmux.\n", version)
+		fmt.Fprintln(os.Stderr, "  For the best experience (footer banner, smooth session switching),")
+		fmt.Fprintln(os.Stderr, "  start a tmux session first and run pr-wrangler from there.")
+		fmt.Fprintln(os.Stderr)
+	}
+	tmuxCancel()
+
 	historyPath, _ := sessionHistoryPath()
 	sessionStore := session.NewStore(historyPath)
 
 	m := tui.NewModel(ghClient, sessionMgr, sessionStore, cfg)
+	if tmuxNotice != "" {
+		m = m.WithStartupNotification(tmuxNotice)
+	}
 	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
