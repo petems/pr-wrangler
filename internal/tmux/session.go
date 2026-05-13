@@ -212,6 +212,19 @@ func (m *SessionManager) CreateNamedWindow(ctx context.Context, sessionName, win
 	return err
 }
 
+// SwitchToWindow selects a named window inside a tmux session, making it
+// the active window. Used after creating a session with multiple windows
+// so subsequent switch-client / attach-session calls land the user on the
+// intended window deterministically.
+func (m *SessionManager) SwitchToWindow(ctx context.Context, sessionName, windowName string) error {
+	target := fmt.Sprintf("%s:%s", sessionName, windowName)
+	_, err := m.Runner.Run(ctx, "tmux", "select-window", "-t", target)
+	if err != nil {
+		return fmt.Errorf("selecting window %q: %w", target, err)
+	}
+	return nil
+}
+
 // InsideTmux reports whether the current process is running inside a tmux session.
 func (m *SessionManager) InsideTmux() bool {
 	return os.Getenv("TMUX") != ""
