@@ -33,7 +33,23 @@ Use Go’s built-in `testing` package. Name tests `TestXxx` and keep them table-
 Use short, imperative commit subjects such as `Add worktree setup for PR sessions`. Keep commits focused and avoid mixing UI, tmux, and config refactors unless they are part of one change. PRs should explain the user-visible change, note risks or follow-up work, and list verification commands run (for example, `make build`, `make test`). Include screenshots or terminal captures when changing TUI behavior.
 
 ## Configuration & Environment Tips
-The app depends on local `git`, `tmux`, and GitHub CLI-compatible access through the configured runner. Avoid hardcoding machine-specific paths; use config-driven repo locations and session storage paths.
+The app depends on local `git`, `tmux`, and a GitHub API token. The token is resolved in order from `GITHUB_TOKEN`, `GH_TOKEN`, then a stored OAuth token written by `pr-wrangler auth login`. Do not reintroduce a hard dependency on the `gh` CLI for API calls — the project deliberately uses the native `go-github` client so that scopes (`repo`) are explicit and bounded. The resolved token is re-exported as `GITHUB_TOKEN` to any subprocess (e.g. the Claude agent) so the same identity is used end-to-end. Avoid hardcoding machine-specific paths; use config-driven repo locations and session storage paths.
+
+## GitHub Integration
+The GitHub layer lives in `internal/github`:
+
+- `client.go` wraps `go-github` v72. `FetchPRs` runs the Search API once, then fans out up to 8 concurrent detail fetches (pull, reviews, check runs, combined status) and reassembles results in original search order so the UI ordering is stable.
+- `device_flow.go` implements the OAuth device-flow handshake against `github.com/login/device/code` and `github.com/login/oauth/access_token`. No client secret is required; only a public OAuth App Client ID with "Device Flow" enabled.
+- `auth.go` stores `TokenInfo` at `~/.config/pr-wrangler/auth.json` with mode `0600`, and exposes `ResolveToken()` for the env-var → stored-token chain.
+- `SAMLAuthError` / `SAMLErrorEntry` represent 403 SAML failures. They are interleaved back into the PR list at their original index by the TUI so SAML-protected PRs stay in the right position rather than being silently dropped or appended.
+
+When changing the fetch flow, preserve: (1) original search order, (2) the per-PR concurrency cap, (3) SAML detection via both the `X-GitHub-SSO` header and the documented message body, and (4) the progress callback contract (`progress(0, total)` after search, then `progress(done, total)` per completion).
+
+## TUI Message Flow
+The Bubble Tea model in `internal/tui/model.go` follows a deliberate async pattern:
+
+- A fetch returns `prsFetchStartedMsg` with a channel; the model then drains `prsProgressMsg` events and finally a `prsLoadedMsg`. Every message is tagged with the source channel so messages from a superseded fetch (e.g. user pressed `r` mid-fetch) are dropped instead of corrupting state — keep that invariant when adding new fetch-shaped commands.
+- Opening a session is a three-step chain: `ensureWorktreeCmd` → `worktreeReadyMsg` → `ensureSessionCmd` → `sessionReadyMsg` → `switchClientCmd` (which uses `tea.ExecProcess` to suspend Bubble Tea before handing the terminal to `tmux switch-client` / `attach-session`). If you add new pre-session work, slot it before `ensureSessionCmd`; do not block the Update loop on tmux I/O.
 
 ## Agentic UI/UX Validation
 
@@ -74,8 +90,8 @@ go install github.com/charmbracelet/vhs@latest
 
 **Runtime dependencies**: Go 1.25+, `tmux`, and `git` are pre-installed. `golangci-lint` is installed to `$HOME/go/bin` via the update script; `$HOME/go/bin` is already on `PATH` via `~/.bashrc`.
 
-**GitHub authentication**: The TUI requires a GitHub token. Set `GITHUB_TOKEN` or `GH_TOKEN` before running `./pr-wrangler`. In Cloud Agent VMs, `gh auth token` provides a token but it may have limited scopes (e.g. 403 on user fetch). The app still launches and displays its TUI; PR search results depend on token permissions.
+**GitHub authentication**: The TUI requires a GitHub token. The preferred path is `./pr-wrangler auth login` (OAuth device flow) which stores a scoped token in `~/.config/pr-wrangler/auth.json`. Alternatively, set `GITHUB_TOKEN` or `GH_TOKEN` before running `./pr-wrangler`. In Cloud Agent VMs, `gh auth token` provides a fallback but it may have limited scopes (e.g. 403 on user fetch). The app still launches and displays its TUI; PR search results depend on token permissions.
 
-**Running the app**: `make build && GITHUB_TOKEN=$(gh auth token) ./pr-wrangler` launches the Bubble Tea TUI. Use `./pr-wrangler version` or `./pr-wrangler help` for non-interactive checks. The TUI is an alt-screen terminal app; press `q` to quit.
+**Running the app**: `make build && ./pr-wrangler` launches the Bubble Tea TUI (assumes you've already run `./pr-wrangler auth login` or exported `GITHUB_TOKEN`). Use `./pr-wrangler version` or `./pr-wrangler help` for non-interactive checks. The TUI is an alt-screen terminal app; press `q` to quit.
 
 **Standard dev commands**: See `## Build, Test, and Development Commands` above or run `make help`.
