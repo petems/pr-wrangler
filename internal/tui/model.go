@@ -101,6 +101,14 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 	}
 }
 
+// WithStartupNotification sets a notification line that's visible from the
+// first frame of the TUI. Used by main.go to surface boot-time warnings
+// (e.g. "tmux not installed") into the TUI itself, not just stderr.
+func (m Model) WithStartupNotification(msg string) Model {
+	m.notification = msg
+	return m
+}
+
 // NewDemoModel builds a Model populated entirely from mock data so the TUI
 // can be previewed locally or rendered to ASCII without any GitHub or tmux
 // dependencies. ghClient, sessionMgr, and sessionStore are intentionally nil:
@@ -298,9 +306,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.warningError != nil {
 			m.lastError = fmt.Errorf("%s: %w", msg.warning, msg.warningError)
 		}
-		return m, ensureSessionCmd(m.sessionMgr, msg.sess, msg.windowName, msg.claudeCmd)
+		return m, ensureSessionCmd(m.sessionMgr, msg.sess, msg.windowName, msg.claudeCmd, msg.statusLeft)
 
 	case sessionReadyMsg:
+		// Surface banner-application failures as notifications rather than
+		// errors — the session itself is usable, the banner just won't show.
+		if msg.statusLeftErr != nil {
+			m.notification = fmt.Sprintf("tmux banner not applied: %v", msg.statusLeftErr)
+		}
 		// Session/window created — now suspend Bubble Tea and switch tmux client
 		return m, switchClientCmd(msg.sessionName, m.sessionMgr.InsideTmux())
 
@@ -378,6 +391,11 @@ func (m Model) viewContent() string {
 
 	b.WriteString(m.buildHelpLine())
 
+	if m.shouldShowTmuxBanner() {
+		b.WriteString("\n")
+		b.WriteString(m.renderTmuxBanner())
+	}
+
 	if m.showHelp {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderHelp())
@@ -389,6 +407,96 @@ func (m Model) viewContent() string {
 	}
 
 	return b.String()
+}
+
+// shouldShowTmuxBanner reports whether the tmux banner should be drawn at the
+// bottom of the dashboard view. The banner is only useful when both running
+// inside a tmux session and the user has not disabled it via config.
+func (m Model) shouldShowTmuxBanner() bool {
+	if !m.config.ShowTmuxBanner {
+		return false
+	}
+	if m.sessionMgr == nil {
+		return false
+	}
+	return m.sessionMgr.InsideTmux()
+}
+
+// renderTmuxBanner returns a two-line footer reminding the user they are
+// running inside a tmux session, showing the current view, the selected PR
+// (if any), and the detach hotkey.
+func (m Model) renderTmuxBanner() string {
+	const label = " PR Wrangler "
+
+	// Fall back to a sensible default when WindowSizeMsg hasn't arrived
+	// yet (m.width == 0). Otherwise use the real pane width so the banner
+	// fits on narrow panes without wrapping.
+	width := m.width
+	if width <= 0 {
+		width = 40
+	}
+
+	leftRule := strings.Repeat("─", 3)
+	remaining := max(width-lipgloss.Width(leftRule)-lipgloss.Width(label), 0)
+	line1 := truncateAnsi(leftRule+label+strings.Repeat("─", remaining), width)
+
+	viewName := ""
+	if len(m.config.Views) > 0 {
+		viewName = m.config.Views[0].Name
+	}
+
+	prInfo := ""
+	if !m.loading && m.selected >= 0 && m.selected < len(m.rows) {
+		r := m.rows[m.selected]
+		repo := extractRepoName(r.PR.RepoNameWithOwner)
+		if repo != "" && r.PR.Number > 0 {
+			prInfo = fmt.Sprintf("%s#%d", repo, r.PR.Number)
+		}
+	}
+
+	parts := make([]string, 0, 3)
+	if viewName != "" {
+		parts = append(parts, viewName)
+	}
+	if prInfo != "" {
+		parts = append(parts, prInfo)
+	}
+	parts = append(parts, "Ctrl+B D to detach")
+	line2 := truncateAnsi(strings.Join(parts, " | "), width)
+
+	return m.styles.TmuxBanner.Render(line1 + "\n" + line2)
+}
+
+// tmuxStatusLeftBanner returns the per-session tmux status-left content
+// for a PR, or "" when the banner is disabled. The result is a tmux format
+// string — `#[fg=...]...#[default]` style escapes are interpreted by tmux
+// itself, not by lipgloss, so they render in the status bar regardless of
+// what the user is running inside the session.
+//
+// This is what makes the banner visible inside the PR session (e.g. when
+// Claude Code is running in the window). The TUI's own renderTmuxBanner
+// only shows while pr-wrangler is the foreground program.
+func (m Model) tmuxStatusLeftBanner(r PRRow) string {
+	if !m.config.ShowTmuxBanner {
+		return ""
+	}
+
+	viewName := ""
+	if len(m.config.Views) > 0 {
+		viewName = m.config.Views[0].Name
+	}
+	repo := extractRepoName(r.PR.RepoNameWithOwner)
+
+	parts := make([]string, 0, 2)
+	if viewName != "" {
+		parts = append(parts, viewName)
+	}
+	if repo != "" && r.PR.Number > 0 {
+		parts = append(parts, fmt.Sprintf("%s#%d", repo, r.PR.Number))
+	}
+	info := strings.Join(parts, " | ")
+
+	return fmt.Sprintf("#[fg=cyan,bold]── PR Wrangler ── #[default]%s ", info)
 }
 
 // loadingTitle is the block-letter banner shown above the cowsay during loading.
@@ -645,7 +753,10 @@ const (
 	//   - reserve for transient warning/error/
 	//     notification rows                      = 3
 	tableChromeLines = 22
-	minPageSize      = 1
+	// tmuxBannerLines reserves rows for the optional tmux footer banner
+	// (newline prefix + 2 banner lines).
+	tmuxBannerLines = 3
+	minPageSize     = 1
 )
 
 // titleColumnWidth returns the width to allocate to the Title column.
@@ -658,13 +769,17 @@ func (m Model) titleColumnWidth() int {
 }
 
 // tablePageSize returns the table page size based on the available
-// terminal height, leaving room for title, table header/footer, and the
-// help line.
+// terminal height, leaving room for title, table header/footer, the
+// help line, and the optional tmux banner.
 func (m Model) tablePageSize() int {
-	if m.height <= tableChromeLines+minPageSize {
+	chrome := tableChromeLines
+	if m.shouldShowTmuxBanner() {
+		chrome += tmuxBannerLines
+	}
+	if m.height <= chrome+minPageSize {
 		return minPageSize
 	}
-	return m.height - tableChromeLines
+	return m.height - chrome
 }
 
 // columnWidths returns the per-column widths in column order.
@@ -858,7 +973,8 @@ func (m Model) switchToSession() tea.Cmd {
 		PRURL:       r.PR.URL,
 	}
 
-	return ensureWorktreeCmd(m.sessionMgr, sess, repoDir, windowName, claudeCmd)
+	statusLeft := m.tmuxStatusLeftBanner(r)
+	return ensureWorktreeCmd(m.sessionMgr, sess, repoDir, windowName, claudeCmd, statusLeft)
 }
 
 type helpEntry struct {

@@ -54,15 +54,20 @@ type worktreeReadyMsg struct {
 	sess         tmux.PRSession
 	windowName   string
 	claudeCmd    string
+	statusLeft   string
 	warning      string
 	warningError error
 }
 
 // sessionReadyMsg is sent after the tmux session/window has been created,
-// signaling that we should now switch to it.
+// signaling that we should now switch to it. statusLeftErr/statusLeftSet
+// carry the outcome of applying the per-session banner so the model can
+// surface a notification or warning instead of swallowing the result.
 type sessionReadyMsg struct {
-	sessionName string
-	windowName  string
+	sessionName   string
+	windowName    string
+	statusLeftErr error
+	statusLeftSet bool
 }
 
 // fetchPRsCmd kicks off the PR fetch in a background goroutine and returns
@@ -114,7 +119,7 @@ func discoverSessionsCmd(mgr *tmux.SessionManager) tea.Cmd {
 	}
 }
 
-func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, windowName, shellCmd string) tea.Cmd {
+func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, windowName, shellCmd, statusLeft string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -126,6 +131,7 @@ func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, w
 				sess:         sess,
 				windowName:   windowName,
 				claudeCmd:    shellCmd,
+				statusLeft:   statusLeft,
 				warning:      fmt.Sprintf("Worktree setup failed for %q, using base repo dir", sess.Branch),
 				warningError: err,
 			}
@@ -136,13 +142,22 @@ func ensureWorktreeCmd(mgr *tmux.SessionManager, sess tmux.PRSession, repoDir, w
 			sess:       sess,
 			windowName: windowName,
 			claudeCmd:  shellCmd,
+			statusLeft: statusLeft,
 		}
 	}
 }
 
 // ensureSessionCmd creates the tmux session/window if needed, then sends
 // sessionReadyMsg so Update() can call switchClientCmd with tea.ExecProcess.
-func ensureSessionCmd(mgr *tmux.SessionManager, sess tmux.PRSession, windowName, shellCmd string) tea.Cmd {
+//
+// statusLeft, when non-empty, is written onto the session's status-left
+// option so the banner is visible from any window in the PR session — not
+// just inside pr-wrangler's TUI. We apply it on every Enter (not only on
+// creation) so the banner shows up on sessions that existed before
+// pr-wrangler grew this feature, and so config/banner changes propagate
+// without forcing the user to recreate sessions. Users who want their own
+// status-left preserved can set config.ShowTmuxBanner=false.
+func ensureSessionCmd(mgr *tmux.SessionManager, sess tmux.PRSession, windowName, shellCmd, statusLeft string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -157,7 +172,20 @@ func ensureSessionCmd(mgr *tmux.SessionManager, sess tmux.PRSession, windowName,
 			}
 		}
 
-		return sessionReadyMsg{sessionName: sess.SessionName, windowName: windowName}
+		// Surface set-option failures via a notification so the user can see
+		// why the banner isn't appearing (previously these were swallowed,
+		// hiding root causes like missing tmux server access).
+		var statusLeftErr error
+		if statusLeft != "" {
+			statusLeftErr = mgr.SetSessionStatusLeft(ctx, sess.SessionName, statusLeft)
+		}
+
+		return sessionReadyMsg{
+			sessionName:   sess.SessionName,
+			windowName:    windowName,
+			statusLeftErr: statusLeftErr,
+			statusLeftSet: statusLeft != "" && statusLeftErr == nil,
+		}
 	}
 }
 

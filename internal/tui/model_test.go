@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
+	"github.com/petems/pr-wrangler/internal/tmux"
 )
 
 func sendKey(t *testing.T, m Model, key tea.KeyPressMsg) Model {
@@ -659,6 +663,387 @@ func TestTablePageSize(t *testing.T) {
 				t.Errorf("tablePageSize(height=%d) = %d, want %d", tc.height, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTablePageSize_ReservesRowsForTmuxBanner ensures the banner's footer
+// rows are subtracted from the available table height; otherwise the table
+// would overflow the screen when the banner is visible.
+func TestTablePageSize_ReservesRowsForTmuxBanner(t *testing.T) {
+	t.Setenv("TMUX", "1") // make InsideTmux() return true
+
+	cfg := config.DefaultConfig()
+	cfg.ShowTmuxBanner = true
+	sessionMgr := tmux.NewSessionManager(nil, "/tmp", "/tmp")
+
+	m := NewModel(nil, sessionMgr, nil, cfg)
+	m.height = 60
+
+	want := 60 - (tableChromeLines + tmuxBannerLines)
+	if got := m.tablePageSize(); got != want {
+		t.Errorf("tablePageSize with banner = %d, want %d", got, want)
+	}
+}
+
+func TestShouldShowTmuxBanner(t *testing.T) {
+	sessionMgr := tmux.NewSessionManager(nil, "/tmp", "/tmp")
+
+	cases := []struct {
+		name       string
+		tmuxEnv    string
+		sessionMgr *tmux.SessionManager
+		enabled    bool
+		want       bool
+	}{
+		{"inside tmux and enabled shows banner", "1", sessionMgr, true, true},
+		{"inside tmux but disabled hides banner", "1", sessionMgr, false, false},
+		{"outside tmux hides banner even if enabled", "", sessionMgr, true, false},
+		{"nil sessionMgr hides banner", "1", nil, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX", tc.tmuxEnv)
+			cfg := config.DefaultConfig()
+			cfg.ShowTmuxBanner = tc.enabled
+			m := Model{config: cfg, sessionMgr: tc.sessionMgr}
+			if got := m.shouldShowTmuxBanner(); got != tc.want {
+				t.Errorf("shouldShowTmuxBanner = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderTmuxBanner_IncludesLabelDetachHintAndPRInfo(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{{Name: "Team Triage", Query: "team:foo"}}
+
+	m := Model{
+		config: cfg,
+		styles: NewStyles("default"),
+		width:  120,
+		rows: []PRRow{{
+			PR: github.PR{
+				Number:            42,
+				RepoNameWithOwner: "petems/pr-wrangler",
+			},
+		}},
+		selected: 0,
+	}
+
+	out := stripANSI(m.renderTmuxBanner())
+
+	for _, want := range []string{"PR Wrangler", "Team Triage", "pr-wrangler#42", "Ctrl+B D to detach"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("banner missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderTmuxBanner_OmitsPRInfoWhenNoRows(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{{Name: "Empty", Query: "x"}}
+
+	m := Model{
+		config: cfg,
+		styles: NewStyles("default"),
+		width:  120,
+	}
+
+	out := stripANSI(m.renderTmuxBanner())
+
+	if !strings.Contains(out, "Ctrl+B D to detach") {
+		t.Errorf("banner missing detach hint:\n%s", out)
+	}
+	if strings.Contains(out, "#") {
+		t.Errorf("banner should not include PR info when no rows:\n%s", out)
+	}
+}
+
+// TestRenderTmuxBanner_BoundsBothLinesToPaneWidth guards against terminal
+// wrapping when the banner is rendered into a narrow pane or with long
+// view/repo names. If either line exceeds the configured width, the table
+// page-size reservation (tmuxBannerLines) is wrong by however many extra
+// rows the wrap consumes, so the PR table can scroll off-screen.
+func TestRenderTmuxBanner_BoundsBothLinesToPaneWidth(t *testing.T) {
+	cases := []struct {
+		name     string
+		width    int
+		viewName string
+		repo     string
+		prNumber int
+	}{
+		{"narrow pane truncates short content", 20, "My PRs", "petems/pr-wrangler", 42},
+		{"medium pane with long view name", 60, strings.Repeat("VeryLongViewName-", 5), "petems/pr-wrangler", 999999},
+		{"medium pane with long repo name", 60, "My PRs", "org/" + strings.Repeat("very-long-repo-name-", 4), 1},
+		{"wide pane fits everything", 200, "My PRs", "petems/pr-wrangler", 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Views = []config.View{{Name: tc.viewName, Query: "x"}}
+
+			m := Model{
+				config: cfg,
+				styles: NewStyles("default"),
+				width:  tc.width,
+				rows: []PRRow{{
+					PR: github.PR{Number: tc.prNumber, RepoNameWithOwner: tc.repo},
+				}},
+				selected: 0,
+			}
+
+			out := stripANSI(m.renderTmuxBanner())
+			lines := strings.Split(out, "\n")
+			if len(lines) != 2 {
+				t.Fatalf("banner must render exactly 2 lines, got %d:\n%s", len(lines), out)
+			}
+			for i, line := range lines {
+				if w := ansi.StringWidth(line); w > tc.width {
+					t.Errorf("line %d width=%d exceeds pane width=%d\nline: %q", i+1, w, tc.width, line)
+				}
+			}
+		})
+	}
+}
+
+// recordingRunner is a minimal CommandRunner for ensureSessionCmd tests. It
+// records every call and lets the test pre-program responses for specific
+// invocations (e.g. has-session returning success vs failure).
+type recordingRunner struct {
+	calls         [][]string
+	failHas       bool // when true, has-session returns an error (= session missing)
+	failList      bool // when true, list-windows returns an error
+	failSetOption bool // when true, any set-option returns an error
+}
+
+func (r *recordingRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	call := append([]string{name}, args...)
+	r.calls = append(r.calls, call)
+	if len(args) > 0 && args[0] == "has-session" && r.failHas {
+		return nil, fmt.Errorf("no session")
+	}
+	if len(args) > 0 && args[0] == "list-windows" && r.failList {
+		return nil, fmt.Errorf("no session")
+	}
+	if len(args) > 0 && args[0] == "set-option" && r.failSetOption {
+		return nil, fmt.Errorf("set-option failed")
+	}
+	return nil, nil
+}
+
+func (r *recordingRunner) callContains(args ...string) bool {
+	for _, c := range r.calls {
+		if len(c) < len(args) {
+			continue
+		}
+		match := true
+		for i, want := range args {
+			if c[i] != want {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEnsureSessionCmd_SetsStatusLeftOnCreate verifies the fix for the bug
+// where the banner was missing inside the PR's tmux session. When a brand-new
+// session is created, ensureSessionCmd must call set-option for status-left
+// so the banner is visible from any window inside that session.
+func TestEnsureSessionCmd_SetsStatusLeftOnCreate(t *testing.T) {
+	runner := &recordingRunner{failHas: true} // forces session creation path
+	mgr := tmux.NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sess := tmux.PRSession{
+		SessionName: "fix-bug-42",
+		PRNumber:    42,
+		WorkDir:     "/home/test/src/repo",
+		Branch:      "fix-bug",
+	}
+	const banner = "#[fg=cyan,bold]── PR Wrangler ── #[default]My PRs | repo#42 "
+
+	cmd := ensureSessionCmd(mgr, sess, "claude", "claude --help", banner)
+	if cmd == nil {
+		t.Fatal("ensureSessionCmd returned nil cmd")
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatal("expected non-nil message from ensureSessionCmd")
+	}
+
+	if !runner.callContains("tmux", "set-option", "-t", "fix-bug-42", "status-left", banner) {
+		t.Errorf("expected status-left to be set after session creation\ncalls: %v", runner.calls)
+	}
+	if !runner.callContains("tmux", "set-option", "-t", "fix-bug-42", "status-left-length", "200") {
+		t.Errorf("expected status-left-length to be raised\ncalls: %v", runner.calls)
+	}
+}
+
+// TestEnsureSessionCmd_AlwaysAppliesStatusLeftOnExistingSession is the
+// direct regression test for the user-reported bug: pre-existing PR sessions
+// (created before pr-wrangler grew the banner feature, or under an older
+// version) were never getting status-left applied because the previous
+// implementation only set it on creation. Now we always apply, so users see
+// the banner after upgrading without recreating every session.
+func TestEnsureSessionCmd_AlwaysAppliesStatusLeftOnExistingSession(t *testing.T) {
+	runner := &recordingRunner{failHas: false} // has-session succeeds → session exists
+	runner.failList = true                     // window doesn't exist → new-window path
+	mgr := tmux.NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sess := tmux.PRSession{SessionName: "existing", PRNumber: 42, WorkDir: "/tmp"}
+
+	cmd := ensureSessionCmd(mgr, sess, "claude", "claude --help", "some-banner")
+	msg := cmd()
+
+	if !runner.callContains("tmux", "set-option", "-t", "existing", "status-left", "some-banner") {
+		t.Errorf("expected status-left to be applied even on existing session\ncalls: %v", runner.calls)
+	}
+	if ready, ok := msg.(sessionReadyMsg); ok {
+		if !ready.statusLeftSet || ready.statusLeftErr != nil {
+			t.Errorf("statusLeft application should be reported as successful, got set=%v err=%v",
+				ready.statusLeftSet, ready.statusLeftErr)
+		}
+	}
+}
+
+// TestEnsureSessionCmd_SurfacesStatusLeftErrors covers the second part of
+// the fix: when tmux is missing or set-option fails, we no longer swallow
+// the error. The model surfaces it as a notification so the user can see
+// why the banner isn't appearing.
+func TestEnsureSessionCmd_SurfacesStatusLeftErrors(t *testing.T) {
+	runner := &recordingRunner{failHas: true, failSetOption: true}
+	mgr := tmux.NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sess := tmux.PRSession{SessionName: "fresh", PRNumber: 42, WorkDir: "/tmp"}
+
+	cmd := ensureSessionCmd(mgr, sess, "claude", "claude --help", "banner")
+	msg := cmd()
+
+	ready, ok := msg.(sessionReadyMsg)
+	if !ok {
+		t.Fatalf("expected sessionReadyMsg, got %T", msg)
+	}
+	if ready.statusLeftErr == nil {
+		t.Error("expected statusLeftErr to be set when set-option fails")
+	}
+	if ready.statusLeftSet {
+		t.Error("statusLeftSet should be false when application failed")
+	}
+}
+
+// TestEnsureSessionCmd_SkipsStatusLeftWhenBannerEmpty covers the disabled-flag
+// path: tmuxStatusLeftBanner returns "" when ShowTmuxBanner is false, and
+// ensureSessionCmd must not issue any set-option calls in that case.
+func TestEnsureSessionCmd_SkipsStatusLeftWhenBannerEmpty(t *testing.T) {
+	runner := &recordingRunner{failHas: true}
+	mgr := tmux.NewSessionManager(runner, "/home/test", "/home/test/src")
+
+	sess := tmux.PRSession{SessionName: "new-sess", PRNumber: 42, WorkDir: "/tmp"}
+
+	cmd := ensureSessionCmd(mgr, sess, "claude", "claude --help", "")
+	_ = cmd()
+
+	for _, c := range runner.calls {
+		if len(c) >= 2 && c[1] == "set-option" {
+			t.Errorf("must not call set-option when banner is empty\ncalls: %v", runner.calls)
+		}
+	}
+}
+
+// TestWithStartupNotification_PersistsInRender ensures the initial warning
+// set from main.go (e.g. "tmux not installed") survives into the first
+// frame of the TUI and is not clobbered by a window-size or fetch update.
+func TestWithStartupNotification_PersistsInRender(t *testing.T) {
+	cfg := config.DefaultConfig()
+	m := NewModel(nil, nil, nil, cfg).WithStartupNotification("tmux not found")
+	m.loading = false
+	m.rows = []PRRow{{PR: github.PR{Number: 1, RepoNameWithOwner: "x/y", Title: "t"}}}
+	m.width = 120
+	m.height = 30
+
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "tmux not found") {
+		t.Errorf("startup notification missing from first frame:\n%s", out)
+	}
+}
+
+// TestTmuxStatusLeftBanner_BuildsTmuxFormatStringWithPRInfo covers the
+// regression where the banner was only rendered in pr-wrangler's TUI, so
+// switching to the PR session (e.g. into Claude Code) left no banner visible.
+// The fix: when the session is created, we also write a status-left value
+// onto that session so the banner shows up in tmux's own status bar.
+func TestTmuxStatusLeftBanner_BuildsTmuxFormatStringWithPRInfo(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ShowTmuxBanner = true
+	cfg.Views = []config.View{{Name: "My PRs", Query: "x"}}
+
+	m := Model{config: cfg}
+	row := PRRow{PR: github.PR{Number: 42, RepoNameWithOwner: "petems/pr-wrangler"}}
+
+	got := m.tmuxStatusLeftBanner(row)
+
+	for _, want := range []string{"PR Wrangler", "My PRs", "pr-wrangler#42", "#[fg=", "#[default]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status-left banner missing %q\ngot: %q", want, got)
+		}
+	}
+}
+
+// TestTmuxStatusLeftBanner_DisabledReturnsEmpty ensures the feature gate
+// works: when ShowTmuxBanner is false, ensureSessionCmd receives "" and
+// doesn't overwrite the session's status-left at all.
+func TestTmuxStatusLeftBanner_DisabledReturnsEmpty(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ShowTmuxBanner = false
+
+	m := Model{config: cfg}
+	row := PRRow{PR: github.PR{Number: 42, RepoNameWithOwner: "petems/pr-wrangler"}}
+
+	if got := m.tmuxStatusLeftBanner(row); got != "" {
+		t.Errorf("expected empty banner when disabled, got %q", got)
+	}
+}
+
+// TestTmuxStatusLeftBanner_HandlesMissingRepoOrPR guards against malformed
+// or partial PR data. The banner should still render the "PR Wrangler"
+// prefix even when there's no view name or no repo/number.
+func TestTmuxStatusLeftBanner_HandlesMissingRepoOrPR(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ShowTmuxBanner = true
+	cfg.Views = nil
+
+	m := Model{config: cfg}
+	row := PRRow{} // no repo, no PR number, no view
+
+	got := m.tmuxStatusLeftBanner(row)
+
+	if !strings.Contains(got, "PR Wrangler") {
+		t.Errorf("banner should still show PR Wrangler label even with empty PR: %q", got)
+	}
+	if strings.Contains(got, "#0") {
+		t.Errorf("banner must not render #0 when PR number is missing: %q", got)
+	}
+}
+
+// TestRenderTmuxBanner_ZeroWidthUsesFallback covers the initial-render path
+// where WindowSizeMsg has not arrived yet. We still want a reasonable banner
+// rather than a zero-width string.
+func TestRenderTmuxBanner_ZeroWidthUsesFallback(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{{Name: "My PRs", Query: "x"}}
+
+	m := Model{
+		config: cfg,
+		styles: NewStyles("default"),
+		width:  0,
+	}
+
+	out := stripANSI(m.renderTmuxBanner())
+	if !strings.Contains(out, "PR Wrangler") || !strings.Contains(out, "Ctrl+B D to detach") {
+		t.Errorf("banner with zero width still needs label and detach hint:\n%s", out)
 	}
 }
 
