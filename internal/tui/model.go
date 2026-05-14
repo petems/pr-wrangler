@@ -80,6 +80,11 @@ type Model struct {
 	// Used to skip network/tmux side-effects in Init and key handlers so the
 	// demo can run with nil ghClient/sessionMgr/sessionStore.
 	demoMode bool
+
+	// browserOpener is the injection seam for the OS browser launcher so
+	// tests can swap in a stub without shelling out. NewModel and
+	// NewDemoModel default it to defaultOpenBrowser.
+	browserOpener func(string)
 }
 
 func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
@@ -90,14 +95,15 @@ func NewModel(ghClient *github.GHClient, sessionMgr *tmux.SessionManager, sessio
 	s.Style = styles.Loading
 
 	return Model{
-		ghClient:     ghClient,
-		sessionMgr:   sessionMgr,
-		sessionStore: sessionStore,
-		config:       cfg,
-		styles:       styles,
-		loading:      true,
-		spinner:      s,
-		prSessions:   make(map[int]tmux.PRSession),
+		ghClient:      ghClient,
+		sessionMgr:    sessionMgr,
+		sessionStore:  sessionStore,
+		config:        cfg,
+		styles:        styles,
+		loading:       true,
+		spinner:       s,
+		prSessions:    make(map[int]tmux.PRSession),
+		browserOpener: defaultOpenBrowser,
 	}
 }
 
@@ -118,17 +124,18 @@ func NewDemoModel(cfg config.Config) Model {
 	rows := buildRows(prs, samlErrors)
 
 	return Model{
-		config:     cfg,
-		styles:     styles,
-		loading:    false,
-		spinner:    s,
-		width:      140,
-		height:     40,
-		allRows:    rows,
-		rows:       rows,
-		samlErrors: samlErrors,
-		prSessions: MockPRSessions(),
-		demoMode:   true,
+		config:        cfg,
+		styles:        styles,
+		loading:       false,
+		spinner:       s,
+		width:         140,
+		height:        40,
+		allRows:       rows,
+		rows:          rows,
+		samlErrors:    samlErrors,
+		prSessions:    MockPRSessions(),
+		demoMode:      true,
+		browserOpener: defaultOpenBrowser,
 	}
 }
 
@@ -805,8 +812,9 @@ func (m *Model) openSelectedPR() tea.Cmd {
 	if r.PR.URL == "" {
 		return nil
 	}
+	opener := m.browserOpener
 	return func() tea.Msg {
-		openBrowser(r.PR.URL)
+		opener(r.PR.URL)
 		return nil
 	}
 }
@@ -822,8 +830,9 @@ func (m *Model) openSAMLAuthURL() tea.Cmd {
 		return nil
 	}
 
+	opener := m.browserOpener
 	return func() tea.Msg {
-		openBrowser(r.SAMLError.AuthURL)
+		opener(r.SAMLError.AuthURL)
 		return nil
 	}
 }
@@ -980,10 +989,10 @@ func renderError(err error) string {
 	return msg
 }
 
-// openBrowser is a package-level variable so tests can swap in a stub
-// without invoking the real OS browser. Production code keeps the same
-// fire-and-forget behaviour as before.
-var openBrowser = func(url string) {
+// defaultOpenBrowser is the production browser launcher. The Model's
+// browserOpener field defaults to this; tests construct a model and
+// overwrite the field with a stub instead of mutating package state.
+func defaultOpenBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

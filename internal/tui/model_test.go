@@ -693,13 +693,10 @@ func runCmdAndDrain(cmd tea.Cmd) {
 // deref reintroduced in that path triggers a goroutine panic the runtime
 // surfaces as a test failure.
 func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig())
 	// Defence-in-depth: even if the demo guards on 'o'/'a' regress, this
 	// stub keeps the test from shelling out to the real OS browser.
-	orig := openBrowser
-	openBrowser = func(string) {}
-	t.Cleanup(func() { openBrowser = orig })
-
-	m := NewDemoModel(config.DefaultConfig())
+	m.browserOpener = func(string) {}
 
 	if m.ghClient != nil || m.sessionMgr != nil || m.sessionStore != nil {
 		t.Fatalf("demo model should leave clients nil, got ghClient=%v sessionMgr=%v sessionStore=%v",
@@ -773,12 +770,10 @@ func TestDemoModel_RefreshIsNoOp(t *testing.T) {
 // TestDemoModel_OpenPRIsNoOp guards against the demo TUI launching a real
 // browser to mock PR URLs (which 404 for anyone except the repo owner).
 func TestDemoModel_OpenPRIsNoOp(t *testing.T) {
-	orig := openBrowser
-	called := false
-	openBrowser = func(string) { called = true }
-	t.Cleanup(func() { openBrowser = orig })
-
 	m := NewDemoModel(config.DefaultConfig())
+	called := false
+	m.browserOpener = func(string) { called = true }
+
 	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "o", Code: 'o'}))
 	next, ok := updated.(Model)
 	if !ok {
