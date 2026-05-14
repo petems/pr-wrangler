@@ -135,7 +135,7 @@ func NewDemoModel(cfg config.Config) Model {
 		samlErrors:    samlErrors,
 		prSessions:    MockPRSessions(),
 		demoMode:      true,
-		browserOpener: defaultOpenBrowser,
+		browserOpener: noopBrowserOpener,
 	}
 }
 
@@ -988,6 +988,11 @@ func renderError(err error) string {
 	}
 	return msg
 }
+
+// noopBrowserOpener is the default for NewDemoModel so the demo TUI
+// never shells out to the real OS browser even if a key handler
+// regresses and bypasses the demoMode guards in Update.
+func noopBrowserOpener(string) {}
 
 // defaultOpenBrowser is the production browser launcher. The Model's
 // browserOpener field defaults to this; tests construct a model and
