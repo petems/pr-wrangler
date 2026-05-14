@@ -176,7 +176,17 @@ jobs:
         # rather than tracking @latest, which would let a freeze
         # release silently change the rendered PR comment/image.
         # Available versions: https://github.com/charmbracelet/freeze/releases
-        run: go install github.com/charmbracelet/freeze@v0.2.2
+        #
+        # librsvg2-bin is required to avoid a SIGSEGV in
+        # runtime.memmove on Linux runners. freeze's embedded
+        # resvg-go (WASM via wazero) crashes intermittently when
+        # rasterising SVG → PNG. When `rsvg-convert` is on PATH,
+        # freeze prefers it and bypasses the WASM renderer entirely.
+        # See https://github.com/charmbracelet/freeze/issues/203
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          go install github.com/charmbracelet/freeze@v0.2.2
 
       - name: Render preview to PNG and SVG
         # freeze's documented ANSI usage is stdin-based

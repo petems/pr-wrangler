@@ -5,14 +5,45 @@
 
 <img width="506" height="356" alt="Loading Screen" src="https://github.com/user-attachments/assets/851017e4-3714-43af-8b67-27af88b5a706" />
 
-PR Wrangler is a terminal UI for triaging and acting on GitHub pull requests. It uses the `gh` CLI to discover PRs, classifies each PR into actionable states like `Fix CI`, `Address feedback`, or `Resolve conflicts`, and launches task-focused tmux sessions for follow-up work.
+PR Wrangler is a terminal UI for triaging and acting on GitHub pull requests. It talks to the GitHub API directly through a native Go client (`go-github`), classifies each PR into actionable states like `Fix CI`, `Address feedback`, or `Resolve conflicts`, and launches task-focused tmux sessions for follow-up work.
 
 ## Requirements
 
 - Go 1.25+
-- `gh` authenticated against GitHub
-- `tmux`
+- `tmux` and `git` on `PATH`
+- A GitHub token — obtained via `pr-wrangler auth login` (OAuth device flow) or supplied through `GITHUB_TOKEN` / `GH_TOKEN`
 - Optional: `golangci-lint`, `gofumpt`
+
+`pr-wrangler` deliberately does **not** depend on the `gh` CLI. It manages its own token so it only ever holds the scopes it actually needs (`repo`).
+
+## Authentication
+
+`pr-wrangler` has its own auth subcommand backed by GitHub's OAuth device flow:
+
+```bash
+pr-wrangler auth login    # interactive device flow, stores a scoped token
+pr-wrangler auth status   # show current token source and verify it
+pr-wrangler auth logout   # remove the stored token
+```
+
+On first `auth login` you'll be asked for an OAuth App **Client ID**. To create one (one-time setup at https://github.com/settings/applications/new):
+
+- Application name: anything (e.g. `pr-wrangler`)
+- Homepage URL: any URL
+- Authorization callback URL: `http://localhost` (unused by device flow)
+- Check **Enable Device Flow**
+
+Copy the Client ID and paste it when prompted. It's saved to `oauth_client_id` in your config file so you won't be asked again. You can also pre-set it via the `PR_WRANGLER_CLIENT_ID` environment variable or by editing the config directly.
+
+### Token resolution order
+
+When the TUI starts (or any subprocess like the Claude agent runs), the token is resolved in this order:
+
+1. `GITHUB_TOKEN` environment variable
+2. `GH_TOKEN` environment variable
+3. Stored token at `~/.config/pr-wrangler/auth.json` (or the platform-specific equivalent via `os.UserConfigDir()`)
+
+The stored file is created with `0600` permissions and contains the token, the granted scopes, the GitHub username, and a creation timestamp. `pr-wrangler` re-exports the resolved token to spawned agents via `GITHUB_TOKEN=...` so the same identity is used end-to-end.
 
 ## Development
 
@@ -39,7 +70,7 @@ The CI pipeline will automatically run these checks on all pull requests.
 
 ## Configuration
 
-The app reads config from `~/.config/pr-wrangler/config.yaml`. If the file is missing, built-in defaults are used.
+The app reads config from `~/.config/pr-wrangler/config.yaml` (or the platform-specific equivalent — see `os.UserConfigDir`). If the file is missing, built-in defaults are used and `pr-wrangler` will surface the resolved path on the loading screen.
 
 Example:
 
@@ -47,13 +78,20 @@ Example:
 repo_base_dir: /Users/you/projects
 service_label_prefix: service:
 color_scheme: dracula
+oauth_client_id: Iv1.xxxxxxxxxxxxxxxx   # optional; set by `pr-wrangler auth login`
 views:
   - name: My PRs
-    query: author:@me
+    query: author:@me is:open
     default: true
 agent_commands:
   fix-ci: "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate and fix the issues.'"
 ```
+
+Files written to the config dir:
+
+- `config.yaml` — application config (this file)
+- `auth.json` — stored OAuth token (mode `0600`, written by `pr-wrangler auth login`)
+- `history.json` — persisted PR session history
 
 ### Color Schemes
 
@@ -66,7 +104,9 @@ Set `color_scheme` to one of the following values (default: `default`):
 | `solarized` | Blue/cyan palette inspired by Solarized Dark |
 | `nord` | Blue-gray/frost/aurora palette from the Nord theme |
 
-Session history is stored at `~/.config/pr-wrangler/history.json`.
+### Query warnings
+
+`pr-wrangler` warns when the configured search query has no `is:open`, `is:closed`, or `is:merged` qualifier — those queries can hit GitHub's 1000-result search cap and trip secondary rate limits. The configured query is shown above the table on the main dashboard, while the effective query (`<your query> is:pr`) is shown on the loading screen so you can confirm exactly what is being searched.
 
 ## Demo Mode
 
@@ -127,20 +167,21 @@ The comment is keyed by a hidden marker (`<!-- pr-wrangler:ui-preview -->`), so 
 
 ## Repository Layout
 
-- `main.go`: CLI entrypoint
-- `internal/github`: GitHub CLI integration and PR classification
-- `internal/tmux`: tmux and git worktree/session management
-- `internal/tui`: Bubble Tea UI model, commands, and styling
-- `internal/session`: persisted session history
-- `internal/config`: config loading and defaults
+- `main.go`: CLI entrypoint and `pr-wrangler auth` subcommand
+- `internal/github`: native go-github client, OAuth device flow, PR classification, SAML error detection
+- `internal/tmux`: tmux session and git worktree management
+- `internal/tui`: Bubble Tea UI model, async commands, styles
+- `internal/session`: persisted session history (`history.json`)
+- `internal/config`: YAML config loading and defaults
 
 ## Workflow
 
-1. Fetch PRs from GitHub search.
-2. Enrich each PR with `gh pr view`.
-3. Classify the next likely action.
-4. Launch or reuse a tmux session for the selected PR.
-5. Open work in a dedicated repo checkout/worktree when available.
+1. Resolve a GitHub token via the chain documented in [Authentication](#authentication).
+2. Run a single GitHub Search API call (`<query> is:pr`) to find candidate PRs.
+3. Fan out up to 8 concurrent PR detail workers (each worker fetches `pulls`, `reviews`, `check-runs`, and combined status sequentially); PRs are reassembled in the original `updated-desc` order.
+4. Detect 403 SAML errors (via `X-GitHub-SSO` header or known message body) and surface them inline as "SAML Auth Required" rows that can be authorized with `a`.
+5. Classify each PR (`DetermineStatus` → `DetermineAction` in `internal/github`).
+6. On `enter` / `c`, ensure a git worktree for the PR's head branch, then create or attach to a tmux session named after the PR, launching the configured agent command.
 
 ## Features
 
