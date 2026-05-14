@@ -693,6 +693,12 @@ func runCmdAndDrain(cmd tea.Cmd) {
 // deref reintroduced in that path triggers a goroutine panic the runtime
 // surfaces as a test failure.
 func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
+	// Defence-in-depth: even if the demo guards on 'o'/'a' regress, this
+	// stub keeps the test from shelling out to the real OS browser.
+	orig := openBrowser
+	openBrowser = func(string) {}
+	t.Cleanup(func() { openBrowser = orig })
+
 	m := NewDemoModel(config.DefaultConfig())
 
 	if m.ghClient != nil || m.sessionMgr != nil || m.sessionStore != nil {
@@ -761,6 +767,33 @@ func TestDemoModel_RefreshIsNoOp(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Fatalf("demo refresh must return a nil Cmd; got %T", cmd)
+	}
+}
+
+// TestDemoModel_OpenPRIsNoOp guards against the demo TUI launching a real
+// browser to mock PR URLs (which 404 for anyone except the repo owner).
+func TestDemoModel_OpenPRIsNoOp(t *testing.T) {
+	orig := openBrowser
+	called := false
+	openBrowser = func(string) { called = true }
+	t.Cleanup(func() { openBrowser = orig })
+
+	m := NewDemoModel(config.DefaultConfig())
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "o", Code: 'o'}))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	runCmdAndDrain(cmd)
+
+	if called {
+		t.Error("demo 'o' must not invoke openBrowser")
+	}
+	if next.notification == "" {
+		t.Error("demo 'o' should set a notification explaining it's disabled")
+	}
+	if cmd != nil {
+		t.Errorf("demo 'o' must return nil Cmd; got %T", cmd)
 	}
 }
 

@@ -198,8 +198,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.switchToSession()
 		case "o":
+			if m.demoMode {
+				m.notification = "demo mode: opening PR in browser is disabled"
+				return m, nil
+			}
 			return m, m.openSelectedPR()
 		case "a":
+			if m.demoMode {
+				m.notification = "demo mode: opening SAML auth URL is disabled"
+				return m, nil
+			}
 			return m, m.openSAMLAuthURL()
 		case "up", "k":
 			if m.selected > 0 {
@@ -972,7 +980,10 @@ func renderError(err error) string {
 	return msg
 }
 
-func openBrowser(url string) {
+// openBrowser is a package-level variable so tests can swap in a stub
+// without invoking the real OS browser. Production code keeps the same
+// fire-and-forget behaviour as before.
+var openBrowser = func(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
