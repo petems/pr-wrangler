@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ Usage:
   pr-wrangler auth logout  Remove stored credentials
   pr-wrangler cache clear  Delete the on-disk PR cache
   pr-wrangler cache path   Show the on-disk PR cache path
+  pr-wrangler cache status Show cached PR query entries
   pr-wrangler demo         Launch the TUI with mock data (no auth required)
   pr-wrangler demo --render  Render one frame of the demo TUI to stdout
   pr-wrangler help         Show this help
@@ -112,9 +114,19 @@ func runCache(args []string) {
 			os.Exit(1)
 		}
 		fmt.Println(path)
+	case "status":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := printCacheStatus(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading PR cache: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cache command: %s\n", args[0])
-		fmt.Fprintln(os.Stderr, "Available: clear, path")
+		fmt.Fprintln(os.Stderr, "Available: clear, path, status")
 		os.Exit(1)
 	}
 }
@@ -124,7 +136,8 @@ func printCacheUsage() {
 
 Usage:
   pr-wrangler cache clear  Delete the on-disk PR cache
-  pr-wrangler cache path   Show the on-disk PR cache path`)
+  pr-wrangler cache path   Show the on-disk PR cache path
+  pr-wrangler cache status Show cached PR query entries`)
 }
 
 func clearCacheFile(path string) error {
@@ -136,6 +149,42 @@ func clearCacheFile(path string) error {
 		return err
 	}
 	fmt.Printf("Cleared PR cache: %s\n", path)
+	return nil
+}
+
+func printCacheStatus(path string) error {
+	prCache := cache.NewCache(path)
+	if err := prCache.Load(); err != nil {
+		return err
+	}
+	fmt.Printf("PR cache path: %s\n", path)
+	if len(prCache.Entries) == 0 {
+		fmt.Println("No cached PR queries.")
+		return nil
+	}
+
+	keys := make([]string, 0, len(prCache.Entries))
+	for key := range prCache.Entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	fmt.Printf("Cached PR queries: %d\n", len(keys))
+	for _, key := range keys {
+		entry := prCache.Entries[key]
+		query := entry.Query
+		if query == "" {
+			query = key
+		}
+		fmt.Printf("- %s\n", query)
+		fmt.Printf("  PRs: %d\n", len(entry.PRs))
+		fmt.Printf("  SAML errors: %d\n", len(entry.SAMLErrors))
+		if entry.LastUpdated.IsZero() {
+			fmt.Println("  Last updated: unknown")
+		} else {
+			fmt.Printf("  Last updated: %s\n", entry.LastUpdated.Format(time.RFC3339))
+		}
+	}
 	return nil
 }
 

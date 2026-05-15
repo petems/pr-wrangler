@@ -104,7 +104,8 @@ To clear cached PR data without disabling future cache usage, run:
 pr-wrangler cache clear
 ```
 
-Use `pr-wrangler cache path` to inspect the exact cache file location.
+Use `pr-wrangler cache status` to inspect cached query entries and
+`pr-wrangler cache path` to inspect the exact cache file location.
 
 ### Color Schemes
 
