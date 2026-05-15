@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/config"
@@ -29,18 +30,26 @@ func specialKeyPress(code rune) tea.KeyPressMsg {
 
 func drainFetchCmd(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
+	if cmd == nil {
+		t.Fatal("fetch command was nil")
+	}
 	msg := cmd()
 	started, ok := msg.(prsFetchStartedMsg)
 	if !ok {
 		t.Fatalf("fetch command returned %T, want prsFetchStartedMsg", msg)
 	}
+	timeout := time.After(2 * time.Second)
 	for {
-		msg := waitForFetchMsgCmd(started.progressCh)()
-		if msg == nil {
-			t.Fatal("fetch channel closed before prsLoadedMsg")
-		}
-		if _, ok := msg.(prsLoadedMsg); ok {
-			return
+		select {
+		case <-timeout:
+			t.Fatal("timed out waiting for prsLoadedMsg")
+		case msg, ok := <-started.progressCh:
+			if !ok {
+				t.Fatal("fetch channel closed before prsLoadedMsg")
+			}
+			if _, ok := msg.(prsLoadedMsg); ok {
+				return
+			}
 		}
 	}
 }
