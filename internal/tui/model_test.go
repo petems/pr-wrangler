@@ -3,8 +3,10 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 )
@@ -27,10 +29,76 @@ func specialKeyPress(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code})
 }
 
+func drainFetchCmd(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("fetch command was nil")
+	}
+	msg := cmd()
+	started, ok := msg.(prsFetchStartedMsg)
+	if !ok {
+		t.Fatalf("fetch command returned %T, want prsFetchStartedMsg", msg)
+	}
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("timed out waiting for prsLoadedMsg")
+		case msg, ok := <-started.progressCh:
+			if !ok {
+				t.Fatal("fetch channel closed before prsLoadedMsg")
+			}
+			if _, ok := msg.(prsLoadedMsg); ok {
+				return
+			}
+		}
+	}
+}
+
+func TestFetchPRsCmdUsesCacheUnlessRefreshBypasses(t *testing.T) {
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 1, Title: "cached"}}}
+	m := NewModel(fetcher, nil, nil, nil, config.DefaultConfig())
+
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+	fetcher.PRs = []github.PR{{Number: 1, Title: "fresh"}}
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+
+	if got := len(fetcher.Queries); got != 1 {
+		t.Fatalf("non-refresh fetches should use cached result; fetch calls = %d, want 1", got)
+	}
+
+	drainFetchCmd(t, m.refreshCmd())
+	if got := len(fetcher.Queries); got != 2 {
+		t.Fatalf("refresh should bypass cache; fetch calls = %d, want 2", got)
+	}
+}
+
+func TestModelDisableCacheSkipsDiskPreloadAndInMemoryCache(t *testing.T) {
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	prCache.SetForQuery("author:@me is:open", []github.PR{{Number: 1, Title: "from disk"}}, nil)
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 2, Title: "first fetch"}}}
+
+	m := NewModelWithOptions(fetcher, nil, nil, prCache, config.DefaultConfig(), ModelOptions{DisableCache: true})
+	if !m.loading {
+		t.Fatal("disabled cache should skip disk preload and keep model loading")
+	}
+	if len(m.rows) != 0 {
+		t.Fatalf("disabled cache should not populate rows from disk cache, got %d rows", len(m.rows))
+	}
+
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+	fetcher.PRs = []github.PR{{Number: 3, Title: "second fetch"}}
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+
+	if got := len(fetcher.Queries); got != 2 {
+		t.Fatalf("disabled cache should fetch every time; fetch calls = %d, want 2", got)
+	}
+}
+
 func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ColorScheme = "solarized"
-	m := NewModel(nil, nil, nil, cfg)
+	m := NewModel(nil, nil, nil, nil, cfg)
 
 	m = sendKey(t, m, themePickerKeyPress())
 
@@ -43,7 +111,7 @@ func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 }
 
 func TestThemePicker_DownClampsAtEnd(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	m = sendKey(t, m, themePickerKeyPress())
 
 	for i := 0; i < len(ThemeNames)+3; i++ {
@@ -62,7 +130,7 @@ func TestThemePicker_DownClampsAtEnd(t *testing.T) {
 }
 
 func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	oldText := m.styles.TableText
 
 	m = sendKey(t, m, themePickerKeyPress())
@@ -81,7 +149,7 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 }
 
 func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	originalScheme := m.config.ColorScheme
 	originalText := m.styles.TableText
 
