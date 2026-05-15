@@ -100,6 +100,31 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	}
 }
 
+func TestHelpOverlay_InterceptsDashboardKeys(t *testing.T) {
+	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, State: github.PRStateOpen}},
+		{PR: github.PR{Number: 2, State: github.PRStateOpen}},
+	}
+	m.selected = 0
+	m.showHelp = true
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+
+	if !m.showHelp {
+		t.Fatal("expected help overlay to remain open")
+	}
+	if m.selected != 0 {
+		t.Errorf("selected after down with help open: got %d, want 0", m.selected)
+	}
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyEsc))
+
+	if m.showHelp {
+		t.Fatal("expected esc to close help overlay")
+	}
+}
+
 func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
 	m := Model{}
 

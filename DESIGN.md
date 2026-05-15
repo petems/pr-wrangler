@@ -109,8 +109,8 @@ Each entry in `colorSchemes` must populate every token.
 - Page size is derived from terminal height. `pageBounds()` keeps the
   selected row inside the visible window.
 - Rendered strings are measured with `lipgloss.Width` and truncated with
-  `charmbracelet/x/ansi.Truncate` so OSC-8 hyperlinks and style escapes are
-  not split mid-sequence.
+  `github.com/charmbracelet/x/ansi.Truncate` so OSC-8 hyperlinks and style
+  escapes are not split mid-sequence.
 - Re-flow happens only on `tea.WindowSizeMsg`. No layout work belongs
   elsewhere.
 

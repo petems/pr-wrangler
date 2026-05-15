@@ -159,6 +159,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// While help is open, intercept all keys so the table (and other
+		// shortcuts) don't see them.
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc":
+				m.showHelp = false
+			}
+			return m, nil
+		}
+
 		// While the theme picker is open, intercept all keys so the table
 		// (and other shortcuts) don't see them.
 		if m.showThemePicker {
