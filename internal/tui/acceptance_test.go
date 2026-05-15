@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
@@ -36,7 +36,6 @@ func newAcceptanceTestModel(t *testing.T, fetcher *MockPRFetcher, cfg config.Con
 	m := NewModel(fetcher, mgr, store, prCache, cfg)
 	m.width = 160
 	m.height = 40
-	m.table = m.rebuildTable()
 	return m
 }
 
@@ -66,15 +65,15 @@ func loadAcceptanceModel(t *testing.T, m Model) Model {
 
 func assertViewContains(t *testing.T, m Model, want string) {
 	t.Helper()
-	if !strings.Contains(stripANSI(m.View()), want) {
-		t.Fatalf("view missing %q:\n%s", want, stripANSI(m.View()))
+	if !strings.Contains(stripANSI(m.View().Content), want) {
+		t.Fatalf("view missing %q:\n%s", want, stripANSI(m.View().Content))
 	}
 }
 
 func assertViewNotContains(t *testing.T, m Model, unwanted string) {
 	t.Helper()
-	if strings.Contains(stripANSI(m.View()), unwanted) {
-		t.Fatalf("view unexpectedly contained %q:\n%s", unwanted, stripANSI(m.View()))
+	if strings.Contains(stripANSI(m.View().Content), unwanted) {
+		t.Fatalf("view unexpectedly contained %q:\n%s", unwanted, stripANSI(m.View().Content))
 	}
 }
 
