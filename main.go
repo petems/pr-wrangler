@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -337,7 +338,13 @@ func runTUI() {
 	}
 	sessionStore := session.NewStore(historyPath)
 
-	m := tui.NewModel(ghClient, sessionMgr, sessionStore, cfg)
+	cachePath, _ := config.CachePath()
+	prCache := cache.NewCache(cachePath)
+	if err := prCache.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+	}
+
+	m := tui.NewModel(ghClient, sessionMgr, sessionStore, prCache, cfg)
 	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {

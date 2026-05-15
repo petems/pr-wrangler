@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -31,7 +32,8 @@ func newAcceptanceTestModel(t *testing.T, fetcher *MockPRFetcher, cfg config.Con
 	}
 	mgr := tmux.NewSessionManager(&acceptanceMockRunner{}, t.TempDir(), t.TempDir())
 	store := session.NewStore(t.TempDir() + "/sessions.json")
-	m := NewModel(fetcher, mgr, store, cfg)
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	m := NewModel(fetcher, mgr, store, prCache, cfg)
 	m.width = 160
 	m.height = 40
 	m.table = m.rebuildTable()

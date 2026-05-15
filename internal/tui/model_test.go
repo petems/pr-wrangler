@@ -30,7 +30,7 @@ func specialKeyPress(code rune) tea.KeyPressMsg {
 func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ColorScheme = "solarized"
-	m := NewModel(nil, nil, nil, cfg)
+	m := NewModel(nil, nil, nil, nil, cfg)
 
 	m = sendKey(t, m, themePickerKeyPress())
 
@@ -43,7 +43,7 @@ func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 }
 
 func TestThemePicker_DownClampsAtEnd(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	m = sendKey(t, m, themePickerKeyPress())
 
 	for i := 0; i < len(ThemeNames)+3; i++ {
@@ -62,7 +62,7 @@ func TestThemePicker_DownClampsAtEnd(t *testing.T) {
 }
 
 func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	oldText := m.styles.TableText
 
 	m = sendKey(t, m, themePickerKeyPress())
@@ -81,7 +81,7 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 }
 
 func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	originalScheme := m.config.ColorScheme
 	originalText := m.styles.TableText
 

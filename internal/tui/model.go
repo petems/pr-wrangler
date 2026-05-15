@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -43,6 +44,7 @@ type Model struct {
 	cachedClient *github.CachedClient
 	sessionMgr   *tmux.SessionManager
 	sessionStore *session.Store
+	cache        *cache.Cache
 	config       config.Config
 
 	styles Styles
@@ -50,11 +52,12 @@ type Model struct {
 	width  int
 	height int
 
-	allRows   []PRRow
-	rows      []PRRow
-	selected  int // highlighted row index in rows
-	loading   bool
-	lastError error
+	allRows    []PRRow
+	rows       []PRRow
+	selected   int // highlighted row index in rows
+	loading    bool
+	refreshing bool
+	lastError  error
 
 	spinner spinner.Model
 
@@ -89,18 +92,19 @@ type Model struct {
 	browserOpener func(string)
 }
 
-func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, cfg config.Config) Model {
+func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, prCache *cache.Cache, cfg config.Config) Model {
 	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.Loading
 
-	return Model{
+	m := Model{
 		ghClient:      ghClient,
 		cachedClient:  github.NewCachedClient(ghClient, 30*time.Second),
 		sessionMgr:    sessionMgr,
 		sessionStore:  sessionStore,
+		cache:         prCache,
 		config:        cfg,
 		styles:        styles,
 		loading:       true,
@@ -108,6 +112,18 @@ func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessio
 		prSessions:    make(map[int]tmux.PRSession),
 		browserOpener: defaultOpenBrowser,
 	}
+
+	if prCache != nil {
+		if entry, ok := prCache.GetForQuery(m.configuredQuery()); ok {
+			m.samlErrors = entry.SAMLErrors
+			m.allRows = buildRows(entry.PRs, entry.SAMLErrors)
+			m.applyFilters()
+			m.loading = false
+			m.refreshing = true
+		}
+	}
+
+	return m
 }
 
 // NewDemoModel builds a Model populated entirely from mock data so the TUI
@@ -197,7 +213,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notification = "demo mode: refresh is disabled"
 				return m, nil
 			}
-			m.loading = true
+			if len(m.allRows) == 0 {
+				m.loading = true
+				m.refreshing = false
+			} else {
+				m.refreshing = true
+			}
 			return m, m.refreshCmd()
 		case "?":
 			m.showHelp = !m.showHelp
@@ -285,6 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, waitForFetchMsgCmd(msg.progressCh)
 		}
 		m.loading = false
+		m.refreshing = false
 		m.progressCh = nil
 		m.progressDone = 0
 		m.progressTotal = 0
@@ -298,6 +320,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected = 0
 			} else if m.selected >= len(m.rows) {
 				m.selected = len(m.rows) - 1
+			}
+			if m.cache != nil {
+				m.cache.SetForQuery(m.configuredQuery(), msg.prs, msg.samlErrors)
+				if err := m.cache.Save(); err != nil {
+					m.lastError = fmt.Errorf("saving PR cache: %w", err)
+				}
 			}
 		}
 
@@ -374,6 +402,9 @@ func (m Model) viewContent() string {
 	b.WriteString(m.styles.Title.Render("PR Wrangler"))
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [query: %s]", q)))
+	}
+	if m.refreshing && !m.loading {
+		b.WriteString(m.styles.Loading.Render("  Refreshing..."))
 	}
 	b.WriteString("\n\n")
 	if w := queryWarning(m.configuredQuery()); w != "" {
