@@ -140,6 +140,7 @@ func TestAcceptanceLoadingStateRendersProgress(t *testing.T) {
 	updated, _ := m.Update(started)
 	m = updated.(Model)
 	assertViewContains(t, m, "Searching for PRs...")
+	assertViewContains(t, m, "First Load might take a bit longer")
 
 	updated, _ = m.Update(prsProgressMsg{progressCh: started.progressCh, done: 2, total: 4})
 	m = updated.(Model)

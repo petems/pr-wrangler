@@ -577,6 +577,11 @@ func (m Model) renderLoadingScreen() string {
 			b.WriteString(centerLine(m.styles.Warning.Render(w), width))
 			b.WriteString("\n")
 		}
+		if m.cache != nil {
+			note := "First Load might take a bit longer, afterwards cache will speed things up!"
+			b.WriteString(centerLine(m.styles.Help.Render(note), width))
+			b.WriteString("\n")
+		}
 	}
 
 	// Pin the config source line to the lower-left of the screen.
