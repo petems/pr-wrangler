@@ -169,7 +169,7 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 }
 
 func TestHelpOverlay_InterceptsDashboardKeys(t *testing.T) {
-	m := NewModel(nil, nil, nil, config.DefaultConfig())
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	m.rows = []PRRow{
 		{PR: github.PR{Number: 1, State: github.PRStateOpen}},
 		{PR: github.PR{Number: 2, State: github.PRStateOpen}},
