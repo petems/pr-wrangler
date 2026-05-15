@@ -1,6 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
+
 Start with `README.md` for the product overview, local requirements, and config shape. `main.go` is the CLI entrypoint and wires config, GitHub access, tmux session management, session persistence, and the Bubble Tea UI together. Core code lives under `internal/`:
 
 - `internal/config`: config loading and session-related config types
@@ -12,6 +13,7 @@ Start with `README.md` for the product overview, local requirements, and config 
 Keep tests next to the code they cover, using `*_test.go`. The `docs/` directory is available for design notes and supporting documentation.
 
 ## Build, Test, and Development Commands
+
 - `make build`: compile `./pr-wrangler`
 - `make run`: build and launch the TUI locally
 - `make test`: run all Go tests
@@ -24,18 +26,23 @@ Keep tests next to the code they cover, using `*_test.go`. The `docs/` directory
 Use `make help` to list the full target set.
 
 ## Coding Style & Naming Conventions
+
 Follow standard Go style: tabs for indentation, exported names in `CamelCase`, unexported names in `camelCase`, and concise receiver names like `m` for models/managers. Prefer small package-focused files inside `internal/...` over large cross-cutting modules. Format code before submitting with `make fmt`; CI-friendly format validation is `make fmt-check`.
 
 ## Testing Guidelines
+
 Use Go’s built-in `testing` package. Name tests `TestXxx` and keep them table-driven when multiple scenarios share setup. Favor unit tests around command runners, TUI message flow, and GitHub/tmux edge cases. Run `make test` before opening a PR and `make test-race` for concurrency-sensitive changes.
 
 ## Commit & Pull Request Guidelines
+
 Use short, imperative commit subjects such as `Add worktree setup for PR sessions`. Keep commits focused and avoid mixing UI, tmux, and config refactors unless they are part of one change. PRs should explain the user-visible change, note risks or follow-up work, and list verification commands run (for example, `make build`, `make test`). Include screenshots or terminal captures when changing TUI behavior.
 
 ## Configuration & Environment Tips
+
 The app depends on local `git`, `tmux`, and a GitHub API token. The token is resolved in order from `GITHUB_TOKEN`, `GH_TOKEN`, then a stored OAuth token written by `pr-wrangler auth login`. Do not reintroduce a hard dependency on the `gh` CLI for API calls — the project deliberately uses the native `go-github` client so that scopes (`repo`) are explicit and bounded. The resolved token is re-exported as `GITHUB_TOKEN` to any subprocess (e.g. the Claude agent) so the same identity is used end-to-end. Avoid hardcoding machine-specific paths; use config-driven repo locations and session storage paths.
 
 ## GitHub Integration
+
 The GitHub layer lives in `internal/github`:
 
 - `client.go` wraps `go-github` v72. `FetchPRs` runs the Search API once, then fans out up to 8 concurrent PR detail workers (each worker fetches its pull, reviews, check runs, and combined status sequentially) and reassembles results in original search order so the UI ordering is stable.
@@ -46,6 +53,7 @@ The GitHub layer lives in `internal/github`:
 When changing the fetch flow, preserve: (1) original search order, (2) the per-PR concurrency cap, (3) SAML detection via both the `X-GitHub-SSO` header and the documented message body, and (4) the progress callback contract (`progress(0, total)` after search, then `progress(done, total)` per completion).
 
 ## TUI Message Flow
+
 The Bubble Tea model in `internal/tui/model.go` follows a deliberate async pattern:
 
 - A fetch returns `prsFetchStartedMsg` with a channel; the model then drains `prsProgressMsg` events and finally a `prsLoadedMsg`. Every message is tagged with the source channel so messages from a superseded fetch (e.g. user pressed `r` mid-fetch) are dropped instead of corrupting state — keep that invariant when adding new fetch-shaped commands.
@@ -63,12 +71,12 @@ make check        # fmt-check + lint + vet + test-race
 
 **Visual validation** — pick the capture format that matches the change:
 
-| Capture | Command | Use it for |
-|---|---|---|
-| `preview.txt` (ANSI text) | `make preview-capture` | Quick diffing, regression tracking, anything where ANSI escape sequences are the source of truth. |
-| `preview.png` (still image) | `make preview-image` | Layout, alignment, colour palette, table column widths, overlay positioning — anywhere a still frame conveys the change. |
-| `demo.gif` (animated) | `make preview-gif` | Anything time-based: spinner behaviour, progress bar, theme picker selection flow, key-driven state transitions. |
-| `make preview-all` | runs all three | Substantial UI changes where you want every artifact in one shot. |
+| Capture                     | Command                | Use it for                                                                                                               |
+| --------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `preview.txt` (ANSI text)   | `make preview-capture` | Quick diffing, regression tracking, anything where ANSI escape sequences are the source of truth.                        |
+| `preview.png` (still image) | `make preview-image`   | Layout, alignment, colour palette, table column widths, overlay positioning — anywhere a still frame conveys the change. |
+| `demo.gif` (animated)       | `make preview-gif`     | Anything time-based: spinner behaviour, progress bar, theme picker selection flow, key-driven state transitions.         |
+| `make preview-all`          | runs all three         | Substantial UI changes where you want every artifact in one shot.                                                        |
 
 The `preview-image` and `preview-gif` targets shell out to [`freeze`](https://github.com/charmbracelet/freeze) and [`vhs`](https://github.com/charmbracelet/vhs) respectively. If they're not installed, the targets fail fast with the install hint:
 

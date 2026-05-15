@@ -43,6 +43,7 @@ Read the referenced code and determine:
 3. **UNCERTAIN** - Not sure; ask the user
 
 **Likely TRUE POSITIVE:**
+
 - Code obviously violates stated behavior
 - Missing null checks on potentially undefined values
 - Type mismatches or incorrect function signatures
@@ -50,6 +51,7 @@ Read the referenced code and determine:
 - Missing error handling for documented failure cases
 
 **Likely FALSE POSITIVE:**
+
 - Bot doesn't understand the framework/library patterns
 - Code is intentionally structured that way (with comments explaining why)
 - Bot is flagging style preferences, not bugs
@@ -57,6 +59,7 @@ Read the referenced code and determine:
 - Bot misread the code flow
 
 **When UNCERTAIN -- ask the user:**
+
 - The fix would require architectural changes
 - You're genuinely unsure if the behavior is intentional
 - The "bug" relates to business logic you don't fully understand
@@ -79,6 +82,7 @@ After evaluating and fixing ALL unanswered comments:
 
 1. Run your project's lint and type-check
 2. Stage, commit, and push:
+
    ```bash
    git add -A
    git commit -m "fix: address PR review bot findings
@@ -86,6 +90,7 @@ After evaluating and fixing ALL unanswered comments:
    {List of bugs fixed, grouped by bot}"
    git push
    ```
+
 3. Capture the commit hash from the output.
 
 ### Step 4: Reply to All Comments
@@ -125,6 +130,7 @@ Run `npx pr-wrangler-reviews --watch --bots-only` as a background task.
 **5c.** Check the output:
 
 - **If new comments were found** (output contains `EXITING WITH NEW COMMENTS`):
+
   1. Use `--detail <id>` to read each new comment's full detail
   2. Process them exactly as in Phase 1, Steps 2-4 (evaluate, fix, commit, push, reply)
   3. **Go back to Step 5a** to restart the watcher
@@ -162,16 +168,19 @@ All findings addressed. Watch completed.
 ## Important Notes
 
 ### Response Policy
+
 - **Every finding gets a response** - No silent ignores
 - Responses help train bots and document decisions
 - "Won't fix" responses prevent the same false positive from being re-raised
 
 ### User Interaction
+
 - Ask the user when uncertain about a finding
 - Don't guess on architectural or business logic questions
 - It's better to ask than to make a wrong fix or wrong dismissal
 
 ### Best Practices
+
 - Verify findings before fixing - bots have false positives
 - Keep fixes minimal and focused - don't refactor unrelated code
 - Ensure type-check and lint pass before committing

@@ -43,6 +43,7 @@ Read the referenced code and the reviewer's comment. Human reviewers are general
 3. **ALREADY ADDRESSED** - The concern has already been fixed or is no longer relevant
 
 **Likely ACTIONABLE:**
+
 - Reviewer points out a bug or logic error
 - Reviewer requests a specific code change
 - Reviewer identifies missing edge cases or error handling
@@ -50,6 +51,7 @@ Read the referenced code and the reviewer's comment. Human reviewers are general
 - Reviewer suggests a better approach with justification
 
 **Likely DISCUSSION -- ask the user:**
+
 - Reviewer suggests an architectural change you're unsure about
 - Comment involves a tradeoff (performance vs readability, etc.)
 - Reviewer's suggestion conflicts with patterns used elsewhere in the codebase
@@ -57,6 +59,7 @@ Read the referenced code and the reviewer's comment. Human reviewers are general
 - You disagree with the feedback and want the author to weigh in
 
 **Likely ALREADY ADDRESSED:**
+
 - The code has been changed since the review was posted
 - Another commit already fixed the issue
 - The comment refers to code that no longer exists
@@ -77,6 +80,7 @@ After evaluating and fixing ALL unanswered comments:
 
 1. Run your project's lint and type-check
 2. Stage, commit, and push:
+
    ```bash
    git add -A
    git commit -m "fix: address PR review feedback
@@ -84,6 +88,7 @@ After evaluating and fixing ALL unanswered comments:
    {List of changes made, grouped by reviewer}"
    git push
    ```
+
 3. Capture the commit hash from the output.
 
 ### Step 4: Reply to All Comments
@@ -123,6 +128,7 @@ Run `npx pr-wrangler-reviews --watch --humans-only` as a background task.
 **5c.** Check the output:
 
 - **If new comments were found** (output contains `EXITING WITH NEW COMMENTS`):
+
   1. Use `--detail <id>` to read each new comment's full detail
   2. Process them exactly as in Phase 1, Steps 2-4 (evaluate, fix, commit, push, reply)
   3. **Go back to Step 5a** to restart the watcher
@@ -157,16 +163,19 @@ All review comments addressed. Watch completed.
 ## Important Notes
 
 ### Response Policy
+
 - **Every comment gets a response** - No silent ignores
 - Replies keep reviewers informed and unblock approvals
 - Even "already addressed" comments deserve acknowledgement
 
 ### User Interaction
+
 - Ask the user when the right approach is unclear
 - Human reviewers often have context you don't - defer to the author when unsure
 - It's better to ask than to make a change the author wouldn't approve
 
 ### Best Practices
+
 - Human reviewers are generally more accurate than bots - default to trusting their feedback
 - Keep fixes minimal and focused - don't refactor unrelated code
 - Ensure type-check and lint pass before committing

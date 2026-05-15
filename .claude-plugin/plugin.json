@@ -9,5 +9,12 @@
   "homepage": "https://github.com/petems/pr-wrangler",
   "repository": "https://github.com/petems/pr-wrangler",
   "license": "MIT",
-  "keywords": ["github", "pull-request", "code-review", "claude-code", "ai-agent", "review-bot"]
+  "keywords": [
+    "github",
+    "pull-request",
+    "code-review",
+    "claude-code",
+    "ai-agent",
+    "review-bot"
+  ]
 }
