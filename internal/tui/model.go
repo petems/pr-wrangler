@@ -146,14 +146,14 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 // dependencies. ghClient, sessionMgr, and sessionStore are intentionally nil:
 // any keypress that exercises a network/tmux code path will no-op or surface
 // a non-fatal error in the demo, which is acceptable for a preview.
-func NewDemoModel(cfg config.Config) Model {
+func NewDemoModel(cfg config.Config, count int) Model {
 	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.Loading
 
-	prs := MockPRs()
+	prs := GenerateMockPRs(count)
 	samlErrors := MockSAMLErrors()
 	rows := buildRows(prs, samlErrors)
 
@@ -723,15 +723,22 @@ const (
 	minTitleColumnWidth  = 10
 	// tableChromeLines reserves rows of the terminal for non-table chrome
 	// in View() so the cowsay header stays visible:
-	//   - cowsay block: 8 lines + 1 trailing blank = 9
-	//   - title line + 1 trailing blank          = 2
-	//   - table chrome (top border, header,
-	//     header separator, bottom border)       = 4
-	//   - page indicator + blank                 = 2
-	//   - blank line after table + help line     = 2
-	//   - reserve for transient warning/error/
-	//     notification rows                      = 3
-	tableChromeLines = 22
+	//   - cowsay block: 8 lines + "\n\n" => 9 (1 blank line after the cow)
+	//   - title section (3 lines):
+	//       - Title.Render() includes MarginBottom(1), which emits 1 newline and
+	//         creates the query/refresh line (even if it's empty)
+	//       - the explicit "\n\n" after the title block contributes one extra
+	//         blank line before the table
+	//   - table chrome from lipgloss/table (4 lines): top border + header +
+	//     header separator + bottom border
+	//   - footer/help section (1 line): viewContent() appends a single "\n" after
+	//     renderTable() (lipgloss/table.Render() does not include a trailing "\n")
+	//   - page indicator (1 line): renderTable() prefixes it with "\n" when
+	//     totalPages > 1
+	//   - reserve for transient warning/error/notification rows = 3
+	//
+	// Total: (9 + 3 + 4 + 1) + 1 + 3 = 21
+	tableChromeLines = 21
 	minPageSize      = 1
 )
 
@@ -787,6 +794,22 @@ func (m Model) renderTable() string {
 	start, end, page, totalPages := m.pageBounds()
 	widths := m.columnWidths()
 
+	cellPad := func(col int) int {
+		// Keep the indicator column tight so it doesn't wrap to 2 lines.
+		if col == 0 {
+			return 0
+		}
+		return 1
+	}
+	cellContentWidth := func(col int) int {
+		p := cellPad(col)
+		w := widths[col] - 2*p
+		if w < 0 {
+			w = 0
+		}
+		return w
+	}
+
 	rows := make([][]string, 0, end-start)
 	urls := make([][]string, 0, end-start)
 	for i := start; i < end; i++ {
@@ -795,11 +818,11 @@ func (m Model) renderTable() string {
 		if i == m.selected {
 			indicator = ">"
 		}
-		repoCell := truncateAnsi(extractRepoName(r.PR.RepoNameWithOwner), widths[1])
-		prCell := fmt.Sprintf("#%d", r.PR.Number)
-		titleCell := truncateAnsi(r.PR.Title, widths[3])
-		statusCell := truncateAnsi(r.Status.String(), widths[4])
-		actionCell := truncateAnsi(r.Action.String(), widths[5])
+		repoCell := truncateAnsi(extractRepoName(r.PR.RepoNameWithOwner), cellContentWidth(1))
+		prCell := truncateAnsi(fmt.Sprintf("#%d", r.PR.Number), cellContentWidth(2))
+		titleCell := truncateAnsi(r.PR.Title, cellContentWidth(3))
+		statusCell := truncateAnsi(r.Status.String(), cellContentWidth(4))
+		actionCell := truncateAnsi(r.Action.String(), cellContentWidth(5))
 
 		rows = append(rows, []string{indicator, repoCell, prCell, titleCell, statusCell, actionCell})
 
@@ -828,8 +851,8 @@ func (m Model) renderTable() string {
 		Headers(headers...).
 		Rows(rows...).
 		StyleFunc(func(row, col int) lipgloss.Style {
-			width := widths[col]
-			s := lipgloss.NewStyle().Width(width).Padding(0, 1)
+			pad := cellPad(col)
+			s := lipgloss.NewStyle().Width(widths[col]).Padding(0, pad)
 			if row == table.HeaderRow {
 				return s.Inherit(headerStyle)
 			}

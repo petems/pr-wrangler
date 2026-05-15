@@ -786,7 +786,7 @@ func runCmdAndDrain(cmd tea.Cmd) {
 // deref reintroduced in that path triggers a goroutine panic the runtime
 // surfaces as a test failure.
 func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	// Defence-in-depth: even if the demo guards on 'o'/'a' regress, this
 	// stub keeps the test from shelling out to the real OS browser.
 	m.browserOpener = func(string) {}
@@ -837,7 +837,7 @@ func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
 // (which would hide the populated rows behind the cowsay loading screen) or
 // dispatch a fetch command.
 func TestDemoModel_RefreshIsNoOp(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	rowsBefore := len(m.rows)
 
 	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
@@ -863,7 +863,7 @@ func TestDemoModel_RefreshIsNoOp(t *testing.T) {
 // TestDemoModel_OpenPRIsNoOp guards against the demo TUI launching a real
 // browser to mock PR URLs (which 404 for anyone except the repo owner).
 func TestDemoModel_OpenPRIsNoOp(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	called := false
 	m.browserOpener = func(string) { called = true }
 
