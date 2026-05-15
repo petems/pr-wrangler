@@ -29,102 +29,108 @@ func (f *fakeFetcher) CallCount() int {
 	return f.calls
 }
 
-func TestCachedClientReturnsCachedResult(t *testing.T) {
-	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1, Title: "a"}}}}
-	client := NewCachedClient(fetcher, 5*time.Minute)
-
-	ctx := context.Background()
-	first, err := client.FetchPRsCached(ctx, "", false, nil)
-	if err != nil {
-		t.Fatalf("first fetch: %v", err)
-	}
-	if first.FromCache {
-		t.Fatalf("expected first fetch not from cache")
-	}
-
-	second, err := client.FetchPRsCached(ctx, "", false, nil)
-	if err != nil {
-		t.Fatalf("second fetch: %v", err)
-	}
-	if !second.FromCache {
-		t.Fatalf("expected second fetch from cache")
-	}
-	if fetcher.CallCount() != 1 {
-		t.Fatalf("expected 1 fetch call, got %d", fetcher.CallCount())
-	}
-}
-
-func TestCachedClientCacheHitReportsInitialAndCompleteProgress(t *testing.T) {
-	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1}}, Errors: []SAMLErrorEntry{{Index: 1}}}}
-	client := NewCachedClient(fetcher, 5*time.Minute)
-
-	ctx := context.Background()
-	if _, err := client.FetchPRsCached(ctx, "", false, nil); err != nil {
-		t.Fatalf("first fetch: %v", err)
-	}
-
-	var steps [][2]int
-	_, err := client.FetchPRsCached(ctx, "", false, func(done, total int) {
-		steps = append(steps, [2]int{done, total})
-	})
-	if err != nil {
-		t.Fatalf("second fetch: %v", err)
-	}
-
-	want := [][2]int{{0, 2}, {2, 2}}
-	if len(steps) != len(want) {
-		t.Fatalf("progress steps = %v, want %v", steps, want)
-	}
-	for i := range want {
-		if steps[i] != want[i] {
-			t.Fatalf("progress steps = %v, want %v", steps, want)
-		}
-	}
-}
-
-func TestCachedClientBypassesCacheOnExplicitRefresh(t *testing.T) {
-	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1, Title: "v1"}}}}
-	client := NewCachedClient(fetcher, 5*time.Minute)
-
-	ctx := context.Background()
-	if _, err := client.FetchPRsCached(ctx, "", false, nil); err != nil {
-		t.Fatalf("first fetch: %v", err)
+func TestCachedClientCacheBehavior(t *testing.T) {
+	tests := []struct {
+		name                string
+		ttl                 time.Duration
+		firstResult         FetchResult
+		secondResult        FetchResult
+		bypassSecondFetch   bool
+		beforeSecondFetch   func()
+		recordProgress      bool
+		wantSecondFromCache bool
+		wantCalls           int
+		wantTitle           string
+		wantProgress        [][2]int
+	}{
+		{
+			name:                "returns cached result",
+			ttl:                 5 * time.Minute,
+			firstResult:         FetchResult{PRs: []PR{{Number: 1, Title: "a"}}},
+			wantSecondFromCache: true,
+			wantCalls:           1,
+			wantTitle:           "a",
+		},
+		{
+			name:                "cache hit reports initial and complete progress",
+			ttl:                 5 * time.Minute,
+			firstResult:         FetchResult{PRs: []PR{{Number: 1}}, Errors: []SAMLErrorEntry{{Index: 1}}},
+			recordProgress:      true,
+			wantSecondFromCache: true,
+			wantCalls:           1,
+			wantProgress:        [][2]int{{0, 2}, {2, 2}},
+		},
+		{
+			name:                "bypasses cache on explicit refresh",
+			ttl:                 5 * time.Minute,
+			firstResult:         FetchResult{PRs: []PR{{Number: 1, Title: "v1"}}},
+			secondResult:        FetchResult{PRs: []PR{{Number: 1, Title: "v2"}}},
+			bypassSecondFetch:   true,
+			wantSecondFromCache: false,
+			wantCalls:           2,
+			wantTitle:           "v2",
+		},
+		{
+			name:                "skips cache when expired",
+			ttl:                 5 * time.Millisecond,
+			firstResult:         FetchResult{PRs: []PR{{Number: 1}}},
+			beforeSecondFetch:   func() { time.Sleep(10 * time.Millisecond) },
+			wantSecondFromCache: false,
+			wantCalls:           2,
+		},
 	}
 
-	fetcher.mu.Lock()
-	fetcher.res = FetchResult{PRs: []PR{{Number: 1, Title: "v2"}}}
-	fetcher.mu.Unlock()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fetcher := &fakeFetcher{res: tt.firstResult}
+			client := NewCachedClient(fetcher, tt.ttl)
+			ctx := context.Background()
 
-	res, err := client.FetchPRsCached(ctx, "", true /* bypassCache */, nil)
-	if err != nil {
-		t.Fatalf("bypass fetch: %v", err)
-	}
-	if res.FromCache {
-		t.Fatalf("expected explicit refresh to bypass cache, got FromCache=true")
-	}
-	if len(res.PRs) != 1 || res.PRs[0].Title != "v2" {
-		t.Fatalf("expected fresh result, got %+v", res.PRs)
-	}
-	if fetcher.CallCount() != 2 {
-		t.Fatalf("expected 2 fetch calls (initial + bypass), got %d", fetcher.CallCount())
-	}
-}
+			first, err := client.FetchPRsCached(ctx, "", false, nil)
+			if err != nil {
+				t.Fatalf("first fetch: %v", err)
+			}
+			if first.FromCache {
+				t.Fatalf("expected first fetch not from cache")
+			}
 
-func TestCachedClientSkipsCacheWhenExpired(t *testing.T) {
-	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1}}}}
-	client := NewCachedClient(fetcher, 5*time.Millisecond)
+			if tt.beforeSecondFetch != nil {
+				tt.beforeSecondFetch()
+			}
+			if tt.secondResult.PRs != nil || tt.secondResult.Errors != nil {
+				fetcher.mu.Lock()
+				fetcher.res = tt.secondResult
+				fetcher.mu.Unlock()
+			}
 
-	ctx := context.Background()
-	_, err := client.FetchPRsCached(ctx, "", false, nil)
-	if err != nil {
-		t.Fatalf("first fetch: %v", err)
-	}
-	time.Sleep(10 * time.Millisecond)
-	_, err = client.FetchPRsCached(ctx, "", false, nil)
-	if err != nil {
-		t.Fatalf("second fetch: %v", err)
-	}
-	if fetcher.CallCount() != 2 {
-		t.Fatalf("expected 2 fetch calls, got %d", fetcher.CallCount())
+			var steps [][2]int
+			var progress func(done, total int)
+			if tt.recordProgress {
+				progress = func(done, total int) {
+					steps = append(steps, [2]int{done, total})
+				}
+			}
+			second, err := client.FetchPRsCached(ctx, "", tt.bypassSecondFetch, progress)
+			if err != nil {
+				t.Fatalf("second fetch: %v", err)
+			}
+			if second.FromCache != tt.wantSecondFromCache {
+				t.Fatalf("second FromCache = %v, want %v", second.FromCache, tt.wantSecondFromCache)
+			}
+			if tt.wantTitle != "" && (len(second.PRs) != 1 || second.PRs[0].Title != tt.wantTitle) {
+				t.Fatalf("second PRs = %+v, want title %q", second.PRs, tt.wantTitle)
+			}
+			if fetcher.CallCount() != tt.wantCalls {
+				t.Fatalf("fetch calls = %d, want %d", fetcher.CallCount(), tt.wantCalls)
+			}
+			if len(steps) != len(tt.wantProgress) {
+				t.Fatalf("progress steps = %v, want %v", steps, tt.wantProgress)
+			}
+			for i := range tt.wantProgress {
+				if steps[i] != tt.wantProgress[i] {
+					t.Fatalf("progress steps = %v, want %v", steps, tt.wantProgress)
+				}
+			}
+		})
 	}
 }
