@@ -40,12 +40,13 @@ type PRRow struct {
 }
 
 type Model struct {
-	ghClient     github.PRFetcher
-	cachedClient *github.CachedClient
-	sessionMgr   *tmux.SessionManager
-	sessionStore *session.Store
-	cache        *cache.Cache
-	config       config.Config
+	ghClient      github.PRFetcher
+	cachedClient  *github.CachedClient
+	sessionMgr    *tmux.SessionManager
+	sessionStore  *session.Store
+	cache         *cache.Cache
+	cacheDisabled bool
+	config        config.Config
 
 	styles Styles
 
@@ -92,19 +93,32 @@ type Model struct {
 	browserOpener func(string)
 }
 
+type ModelOptions struct {
+	DisableCache bool
+}
+
 func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, prCache *cache.Cache, cfg config.Config) Model {
+	return NewModelWithOptions(ghClient, sessionMgr, sessionStore, prCache, cfg, ModelOptions{})
+}
+
+func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessionStore *session.Store, prCache *cache.Cache, cfg config.Config, opts ModelOptions) Model {
 	styles := NewStyles(cfg.ColorScheme)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.Loading
+	cacheTTL := 30 * time.Second
+	if opts.DisableCache {
+		cacheTTL = 0
+	}
 
 	m := Model{
 		ghClient:      ghClient,
-		cachedClient:  github.NewCachedClient(ghClient, 30*time.Second),
+		cachedClient:  github.NewCachedClient(ghClient, cacheTTL),
 		sessionMgr:    sessionMgr,
 		sessionStore:  sessionStore,
 		cache:         prCache,
+		cacheDisabled: opts.DisableCache,
 		config:        cfg,
 		styles:        styles,
 		loading:       true,
@@ -113,7 +127,7 @@ func NewModel(ghClient github.PRFetcher, sessionMgr *tmux.SessionManager, sessio
 		browserOpener: defaultOpenBrowser,
 	}
 
-	if prCache != nil {
+	if !opts.DisableCache && prCache != nil {
 		if entry, ok := prCache.GetForQuery(m.configuredQuery()); ok {
 			samlEntries := cache.ToSAMLErrorEntries(entry.SAMLErrors)
 			m.samlErrors = samlEntries
@@ -322,7 +336,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.selected >= len(m.rows) {
 				m.selected = len(m.rows) - 1
 			}
-			if m.cache != nil {
+			if !m.cacheDisabled && m.cache != nil {
 				m.cache.SetForQuery(m.configuredQuery(), msg.prs, msg.samlErrors)
 				if err := m.cache.Save(); err != nil {
 					m.lastError = fmt.Errorf("saving PR cache: %w", err)

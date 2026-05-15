@@ -36,21 +36,47 @@ func main() {
 		}
 	}
 
-	runTUI()
+	opts, err := parseTUIOptions(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'pr-wrangler help' for usage.")
+		os.Exit(1)
+	}
+	runTUI(opts)
 }
 
 func printUsage() {
 	fmt.Println(`pr-wrangler — manage PRs with AI agents
 
 Usage:
-  pr-wrangler              Launch the TUI
+  pr-wrangler [--no-cache] Launch the TUI
   pr-wrangler auth login   Authenticate with GitHub (device flow)
   pr-wrangler auth status  Show current auth status
   pr-wrangler auth logout  Remove stored credentials
   pr-wrangler demo         Launch the TUI with mock data (no auth required)
   pr-wrangler demo --render  Render one frame of the demo TUI to stdout
   pr-wrangler help         Show this help
-  pr-wrangler version      Show version`)
+  pr-wrangler version      Show version
+
+Flags:
+  --no-cache               Skip disk and in-memory PR cache usage`)
+}
+
+type tuiOptions struct {
+	noCache bool
+}
+
+func parseTUIOptions(args []string) (tuiOptions, error) {
+	var opts tuiOptions
+	for _, arg := range args {
+		switch arg {
+		case "--no-cache":
+			opts.noCache = true
+		default:
+			return tuiOptions{}, fmt.Errorf("unknown flag: %s", arg)
+		}
+	}
+	return opts, nil
 }
 
 func runDemo(args []string) {
@@ -306,7 +332,7 @@ func promptForAuth() {
 	os.Exit(1)
 }
 
-func runTUI() {
+func runTUI(opts tuiOptions) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -339,17 +365,21 @@ func runTUI() {
 	sessionStore := session.NewStore(historyPath)
 
 	var prCache *cache.Cache
-	cachePath, err := config.CachePath()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not determine PR cache path: %v\n", err)
-	} else {
-		prCache = cache.NewCache(cachePath)
-		if err := prCache.Load(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+	if !opts.noCache {
+		cachePath, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not determine PR cache path: %v\n", err)
+		} else {
+			prCache = cache.NewCache(cachePath)
+			if err := prCache.Load(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+			}
 		}
 	}
 
-	m := tui.NewModel(ghClient, sessionMgr, sessionStore, prCache, cfg)
+	m := tui.NewModelWithOptions(ghClient, sessionMgr, sessionStore, prCache, cfg, tui.ModelOptions{
+		DisableCache: opts.noCache,
+	})
 	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {

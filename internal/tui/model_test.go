@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 )
@@ -69,6 +70,28 @@ func TestFetchPRsCmdUsesCacheUnlessRefreshBypasses(t *testing.T) {
 	drainFetchCmd(t, m.refreshCmd())
 	if got := len(fetcher.Queries); got != 2 {
 		t.Fatalf("refresh should bypass cache; fetch calls = %d, want 2", got)
+	}
+}
+
+func TestModelDisableCacheSkipsDiskPreloadAndInMemoryCache(t *testing.T) {
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	prCache.SetForQuery("author:@me is:open", []github.PR{{Number: 1, Title: "from disk"}}, nil)
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 2, Title: "first fetch"}}}
+
+	m := NewModelWithOptions(fetcher, nil, nil, prCache, config.DefaultConfig(), ModelOptions{DisableCache: true})
+	if !m.loading {
+		t.Fatal("disabled cache should skip disk preload and keep model loading")
+	}
+	if len(m.rows) != 0 {
+		t.Fatalf("disabled cache should not populate rows from disk cache, got %d rows", len(m.rows))
+	}
+
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+	fetcher.PRs = []github.PR{{Number: 3, Title: "second fetch"}}
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+
+	if got := len(fetcher.Queries); got != 2 {
+		t.Fatalf("disabled cache should fetch every time; fetch calls = %d, want 2", got)
 	}
 }
 
