@@ -24,6 +24,7 @@ type Config struct {
 	AgentCommands      map[string]string `yaml:"agent_commands"`
 	OAuthClientID      string            `yaml:"oauth_client_id,omitempty"`
 	ColorScheme        string            `yaml:"color_scheme,omitempty"`
+	CacheEnabled       bool              `yaml:"cache_enabled"`
 
 	// Path is the file path consulted during Load. Set even when the file
 	// does not exist (in which case Loaded is false). Not serialized.
@@ -39,6 +40,7 @@ func DefaultConfig() Config {
 		RepoBaseDir:        filepath.Join(home, "projects"),
 		ServiceLabelPrefix: "service:",
 		ColorScheme:        "default",
+		CacheEnabled:       true,
 		AgentCommands: map[string]string{
 			"fix-ci":            "claude --permission-mode acceptEdits 'The CI checks are failing on this PR: {{pr_url}} - Investigate the failing checks, identify the root cause, and fix the issues.'",
 			"address-feedback":  "claude --permission-mode acceptEdits 'This PR has review feedback that needs to be addressed: {{pr_url}} - Read the review comments and make the requested changes.'",
@@ -107,6 +109,10 @@ func LoadFromPath(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
 	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return Config{}, fmt.Errorf("parsing config %s: %w", path, err)
+	}
 
 	if len(cfg.Views) == 0 {
 		cfg.Views = DefaultConfig().Views
@@ -122,6 +128,9 @@ func LoadFromPath(path string) (Config, error) {
 	}
 	if cfg.ColorScheme == "" {
 		cfg.ColorScheme = DefaultConfig().ColorScheme
+	}
+	if _, ok := raw["cache_enabled"]; !ok {
+		cfg.CacheEnabled = DefaultConfig().CacheEnabled
 	}
 
 	cfg.Path = path

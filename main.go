@@ -66,6 +66,10 @@ type tuiOptions struct {
 	noCache bool
 }
 
+func cacheDisabled(opts tuiOptions, cfg config.Config) bool {
+	return opts.noCache || !cfg.CacheEnabled
+}
+
 func parseTUIOptions(args []string) (tuiOptions, error) {
 	var opts tuiOptions
 	for _, arg := range args {
@@ -363,9 +367,10 @@ func runTUI(opts tuiOptions) {
 		os.Exit(1)
 	}
 	sessionStore := session.NewStore(historyPath)
+	disableCache := cacheDisabled(opts, cfg)
 
 	var prCache *cache.Cache
-	if !opts.noCache {
+	if !disableCache {
 		cachePath, err := config.CachePath()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not determine PR cache path: %v\n", err)
@@ -378,7 +383,7 @@ func runTUI(opts tuiOptions) {
 	}
 
 	m := tui.NewModelWithOptions(ghClient, sessionMgr, sessionStore, prCache, cfg, tui.ModelOptions{
-		DisableCache: opts.noCache,
+		DisableCache: disableCache,
 	})
 	p := tea.NewProgram(m)
 

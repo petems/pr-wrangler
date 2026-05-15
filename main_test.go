@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/petems/pr-wrangler/internal/config"
+)
 
 func TestParseTUIOptions(t *testing.T) {
 	tests := []struct {
@@ -38,6 +42,46 @@ func TestParseTUIOptions(t *testing.T) {
 			}
 			if got.noCache != tt.wantNoCache {
 				t.Fatalf("noCache = %v, want %v", got.noCache, tt.wantNoCache)
+			}
+		})
+	}
+}
+
+func TestCacheDisabled(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        tuiOptions
+		cfg         config.Config
+		wantDisable bool
+	}{
+		{
+			name:        "enabled by config",
+			cfg:         config.Config{CacheEnabled: true},
+			wantDisable: false,
+		},
+		{
+			name:        "disabled by config",
+			cfg:         config.Config{CacheEnabled: false},
+			wantDisable: true,
+		},
+		{
+			name:        "flag overrides enabled config",
+			opts:        tuiOptions{noCache: true},
+			cfg:         config.Config{CacheEnabled: true},
+			wantDisable: true,
+		},
+		{
+			name:        "flag preserves disabled config",
+			opts:        tuiOptions{noCache: true},
+			cfg:         config.Config{CacheEnabled: false},
+			wantDisable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cacheDisabled(tt.opts, tt.cfg); got != tt.wantDisable {
+				t.Fatalf("cacheDisabled = %v, want %v", got, tt.wantDisable)
 			}
 		})
 	}
