@@ -169,7 +169,7 @@ func (m Model) Init() tea.Cmd {
 	}
 	return tea.Batch(
 		m.spinner.Tick,
-		m.refreshCmd(),
+		m.fetchPRsCmd(false),
 		m.discoverSessionsCmd(),
 	)
 }
@@ -674,7 +674,11 @@ func renderProgressBar(done, total, width int) string {
 }
 
 func (m *Model) refreshCmd() tea.Cmd {
-	return fetchPRsCmd(m.cachedClient, m.configuredQuery())
+	return m.fetchPRsCmd(true)
+}
+
+func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
+	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache)
 }
 
 func (m *Model) discoverSessionsCmd() tea.Cmd {

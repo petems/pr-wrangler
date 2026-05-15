@@ -338,10 +338,15 @@ func runTUI() {
 	}
 	sessionStore := session.NewStore(historyPath)
 
-	cachePath, _ := config.CachePath()
-	prCache := cache.NewCache(cachePath)
-	if err := prCache.Load(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+	var prCache *cache.Cache
+	cachePath, err := config.CachePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not determine PR cache path: %v\n", err)
+	} else {
+		prCache = cache.NewCache(cachePath)
+		if err := prCache.Load(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+		}
 	}
 
 	m := tui.NewModel(ghClient, sessionMgr, sessionStore, prCache, cfg)

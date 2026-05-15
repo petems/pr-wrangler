@@ -54,6 +54,34 @@ func TestCachedClientReturnsCachedResult(t *testing.T) {
 	}
 }
 
+func TestCachedClientCacheHitReportsInitialAndCompleteProgress(t *testing.T) {
+	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1}}, Errors: []SAMLErrorEntry{{Index: 1}}}}
+	client := NewCachedClient(fetcher, 5*time.Minute)
+
+	ctx := context.Background()
+	if _, err := client.FetchPRsCached(ctx, "", false, nil); err != nil {
+		t.Fatalf("first fetch: %v", err)
+	}
+
+	var steps [][2]int
+	_, err := client.FetchPRsCached(ctx, "", false, func(done, total int) {
+		steps = append(steps, [2]int{done, total})
+	})
+	if err != nil {
+		t.Fatalf("second fetch: %v", err)
+	}
+
+	want := [][2]int{{0, 2}, {2, 2}}
+	if len(steps) != len(want) {
+		t.Fatalf("progress steps = %v, want %v", steps, want)
+	}
+	for i := range want {
+		if steps[i] != want[i] {
+			t.Fatalf("progress steps = %v, want %v", steps, want)
+		}
+	}
+}
+
 func TestCachedClientBypassesCacheOnExplicitRefresh(t *testing.T) {
 	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1, Title: "v1"}}}}
 	client := NewCachedClient(fetcher, 5*time.Minute)
@@ -84,14 +112,14 @@ func TestCachedClientBypassesCacheOnExplicitRefresh(t *testing.T) {
 
 func TestCachedClientSkipsCacheWhenExpired(t *testing.T) {
 	fetcher := &fakeFetcher{res: FetchResult{PRs: []PR{{Number: 1}}}}
-	client := NewCachedClient(fetcher, 1*time.Nanosecond)
+	client := NewCachedClient(fetcher, 5*time.Millisecond)
 
 	ctx := context.Background()
 	_, err := client.FetchPRsCached(ctx, "", false, nil)
 	if err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
-	time.Sleep(2 * time.Nanosecond)
+	time.Sleep(10 * time.Millisecond)
 	_, err = client.FetchPRsCached(ctx, "", false, nil)
 	if err != nil {
 		t.Fatalf("second fetch: %v", err)

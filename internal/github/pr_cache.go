@@ -73,7 +73,9 @@ func (c *CachedClient) FetchPRsCached(ctx context.Context, query string, bypassC
 	if !bypassCache {
 		if cached, ok := c.cache.get(key, c.ttl); ok {
 			if progress != nil {
-				progress(len(cached.PRs)+len(cached.Errors), len(cached.PRs)+len(cached.Errors))
+				total := len(cached.PRs) + len(cached.Errors)
+				progress(0, total)
+				progress(total, total)
 			}
 			return CachedFetchResult{FetchResult: cached, FromCache: true}, nil
 		}

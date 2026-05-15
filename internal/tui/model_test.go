@@ -27,6 +27,42 @@ func specialKeyPress(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: code})
 }
 
+func drainFetchCmd(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	msg := cmd()
+	started, ok := msg.(prsFetchStartedMsg)
+	if !ok {
+		t.Fatalf("fetch command returned %T, want prsFetchStartedMsg", msg)
+	}
+	for {
+		msg := waitForFetchMsgCmd(started.progressCh)()
+		if msg == nil {
+			t.Fatal("fetch channel closed before prsLoadedMsg")
+		}
+		if _, ok := msg.(prsLoadedMsg); ok {
+			return
+		}
+	}
+}
+
+func TestFetchPRsCmdUsesCacheUnlessRefreshBypasses(t *testing.T) {
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 1, Title: "cached"}}}
+	m := NewModel(fetcher, nil, nil, nil, config.DefaultConfig())
+
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+	fetcher.PRs = []github.PR{{Number: 1, Title: "fresh"}}
+	drainFetchCmd(t, m.fetchPRsCmd(false))
+
+	if got := len(fetcher.Queries); got != 1 {
+		t.Fatalf("non-refresh fetches should use cached result; fetch calls = %d, want 1", got)
+	}
+
+	drainFetchCmd(t, m.refreshCmd())
+	if got := len(fetcher.Queries); got != 2 {
+		t.Fatalf("refresh should bypass cache; fetch calls = %d, want 2", got)
+	}
+}
+
 func TestThemePicker_OpensAtCurrentScheme(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ColorScheme = "solarized"
