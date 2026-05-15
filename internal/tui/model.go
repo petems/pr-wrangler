@@ -153,9 +153,7 @@ func NewDemoModel(cfg config.Config, count int) Model {
 	s.Spinner = spinner.Dot
 	s.Style = styles.Loading
 
-	prs := GenerateMockPRs(count)
-	samlErrors := MockSAMLErrors()
-	rows := buildRows(prs, samlErrors)
+	rows, samlErrors := buildDemoRows(count)
 
 	return Model{
 		config:        cfg,
@@ -171,6 +169,43 @@ func NewDemoModel(cfg config.Config, count int) Model {
 		demoMode:      true,
 		browserOpener: noopBrowserOpener,
 	}
+}
+
+func buildDemoRows(count int) ([]PRRow, []github.SAMLErrorEntry) {
+	if count <= 0 {
+		return nil, nil
+	}
+
+	samlErrors := mockSAMLErrorsForCount(count)
+	prCount := count - len(samlErrors)
+	prs := GenerateMockPRs(prCount)
+	rows := buildRows(prs, samlErrors)
+
+	for len(rows) < count {
+		prCount += count - len(rows)
+		prs = GenerateMockPRs(prCount)
+		rows = buildRows(prs, samlErrors)
+	}
+	if len(rows) > count {
+		rows = rows[:count]
+	}
+
+	return rows, samlErrors
+}
+
+func mockSAMLErrorsForCount(count int) []github.SAMLErrorEntry {
+	if count <= 0 {
+		return nil
+	}
+
+	all := MockSAMLErrors()
+	filtered := make([]github.SAMLErrorEntry, 0, len(all))
+	for _, entry := range all {
+		if entry.Index < count {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func (m Model) Init() tea.Cmd {
