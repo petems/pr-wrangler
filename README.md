@@ -98,6 +98,14 @@ Set `cache_enabled: false` to disable both the on-disk PR cache and the
 short-lived in-memory fetch cache. You can also bypass cache usage for a single
 launch with `pr-wrangler --no-cache`.
 
+To clear cached PR data without disabling future cache usage, run:
+
+```bash
+pr-wrangler cache clear
+```
+
+Use `pr-wrangler cache path` to inspect the exact cache file location.
+
 ### Color Schemes
 
 Set `color_scheme` to one of the following values (default: `default`):

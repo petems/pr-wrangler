@@ -24,6 +24,9 @@ func main() {
 		case "auth":
 			runAuth(os.Args[2:])
 			return
+		case "cache":
+			runCache(os.Args[2:])
+			return
 		case "demo":
 			runDemo(os.Args[2:])
 			return
@@ -53,6 +56,8 @@ Usage:
   pr-wrangler auth login   Authenticate with GitHub (device flow)
   pr-wrangler auth status  Show current auth status
   pr-wrangler auth logout  Remove stored credentials
+  pr-wrangler cache clear  Delete the on-disk PR cache
+  pr-wrangler cache path   Show the on-disk PR cache path
   pr-wrangler demo         Launch the TUI with mock data (no auth required)
   pr-wrangler demo --render  Render one frame of the demo TUI to stdout
   pr-wrangler help         Show this help
@@ -81,6 +86,57 @@ func parseTUIOptions(args []string) (tuiOptions, error) {
 		}
 	}
 	return opts, nil
+}
+
+func runCache(args []string) {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		printCacheUsage()
+		return
+	}
+
+	switch args[0] {
+	case "clear":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := clearCacheFile(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Error clearing PR cache: %v\n", err)
+			os.Exit(1)
+		}
+	case "path":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(path)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown cache command: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, "Available: clear, path")
+		os.Exit(1)
+	}
+}
+
+func printCacheUsage() {
+	fmt.Println(`pr-wrangler cache — inspect or clear cached PR data
+
+Usage:
+  pr-wrangler cache clear  Delete the on-disk PR cache
+  pr-wrangler cache path   Show the on-disk PR cache path`)
+}
+
+func clearCacheFile(path string) error {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("PR cache already clear: %s\n", path)
+			return nil
+		}
+		return err
+	}
+	fmt.Printf("Cleared PR cache: %s\n", path)
+	return nil
 }
 
 func runDemo(args []string) {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/petems/pr-wrangler/internal/config"
@@ -84,5 +86,23 @@ func TestCacheDisabled(t *testing.T) {
 				t.Fatalf("cacheDisabled = %v, want %v", got, tt.wantDisable)
 			}
 		})
+	}
+}
+
+func TestClearCacheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pr-cache.json")
+	if err := os.WriteFile(path, []byte(`{"entries":{}}`), 0o600); err != nil {
+		t.Fatalf("writing cache: %v", err)
+	}
+
+	if err := clearCacheFile(path); err != nil {
+		t.Fatalf("clearCacheFile existing file: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cache file still exists after clear: %v", err)
+	}
+
+	if err := clearCacheFile(path); err != nil {
+		t.Fatalf("clearCacheFile missing file should be idempotent: %v", err)
 	}
 }
