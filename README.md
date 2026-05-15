@@ -78,6 +78,7 @@ Example:
 repo_base_dir: /Users/you/projects
 service_label_prefix: service:
 color_scheme: dracula
+cache_enabled: true
 oauth_client_id: Iv1.xxxxxxxxxxxxxxxx   # optional; set by `pr-wrangler auth login`
 views:
   - name: My PRs
@@ -92,6 +93,19 @@ Files written to the config dir:
 - `config.yaml` — application config (this file)
 - `auth.json` — stored OAuth token (mode `0600`, written by `pr-wrangler auth login`)
 - `history.json` — persisted PR session history
+
+Set `cache_enabled: false` to disable both the on-disk PR cache and the
+short-lived in-memory fetch cache. You can also bypass cache usage for a single
+launch with `pr-wrangler --no-cache`.
+
+To clear cached PR data without disabling future cache usage, run:
+
+```bash
+pr-wrangler cache clear
+```
+
+Use `pr-wrangler cache status` to inspect cached query entries and
+`pr-wrangler cache path` to inspect the exact cache file location.
 
 ### Color Schemes
 

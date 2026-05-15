@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
 	"github.com/petems/pr-wrangler/internal/session"
@@ -23,6 +25,9 @@ func main() {
 		case "auth":
 			runAuth(os.Args[2:])
 			return
+		case "cache":
+			runCache(os.Args[2:])
+			return
 		case "demo":
 			runDemo(os.Args[2:])
 			return
@@ -35,21 +40,152 @@ func main() {
 		}
 	}
 
-	runTUI()
+	opts, err := parseTUIOptions(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'pr-wrangler help' for usage.")
+		os.Exit(1)
+	}
+	runTUI(opts)
 }
 
 func printUsage() {
 	fmt.Println(`pr-wrangler — manage PRs with AI agents
 
 Usage:
-  pr-wrangler              Launch the TUI
+  pr-wrangler [--no-cache] Launch the TUI
   pr-wrangler auth login   Authenticate with GitHub (device flow)
   pr-wrangler auth status  Show current auth status
   pr-wrangler auth logout  Remove stored credentials
+  pr-wrangler cache clear  Delete the on-disk PR cache
+  pr-wrangler cache path   Show the on-disk PR cache path
+  pr-wrangler cache status Show cached PR query entries
   pr-wrangler demo         Launch the TUI with mock data (no auth required)
   pr-wrangler demo --render  Render one frame of the demo TUI to stdout
   pr-wrangler help         Show this help
-  pr-wrangler version      Show version`)
+  pr-wrangler version      Show version
+
+Flags:
+  --no-cache               Skip disk and in-memory PR cache usage`)
+}
+
+type tuiOptions struct {
+	noCache bool
+}
+
+func cacheDisabled(opts tuiOptions, cfg config.Config) bool {
+	return opts.noCache || !cfg.CacheEnabled
+}
+
+func parseTUIOptions(args []string) (tuiOptions, error) {
+	var opts tuiOptions
+	for _, arg := range args {
+		switch arg {
+		case "--no-cache":
+			opts.noCache = true
+		default:
+			return tuiOptions{}, fmt.Errorf("unknown flag: %s", arg)
+		}
+	}
+	return opts, nil
+}
+
+func runCache(args []string) {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		printCacheUsage()
+		return
+	}
+
+	switch args[0] {
+	case "clear":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := clearCacheFile(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Error clearing PR cache: %v\n", err)
+			os.Exit(1)
+		}
+	case "path":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(path)
+	case "status":
+		path, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error finding PR cache path: %v\n", err)
+			os.Exit(1)
+		}
+		if err := printCacheStatus(path); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading PR cache: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown cache command: %s\n", args[0])
+		fmt.Fprintln(os.Stderr, "Available: clear, path, status")
+		os.Exit(1)
+	}
+}
+
+func printCacheUsage() {
+	fmt.Println(`pr-wrangler cache — inspect or clear cached PR data
+
+Usage:
+  pr-wrangler cache clear  Delete the on-disk PR cache
+  pr-wrangler cache path   Show the on-disk PR cache path
+  pr-wrangler cache status Show cached PR query entries`)
+}
+
+func clearCacheFile(path string) error {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("PR cache already clear: %s\n", path)
+			return nil
+		}
+		return err
+	}
+	fmt.Printf("Cleared PR cache: %s\n", path)
+	return nil
+}
+
+func printCacheStatus(path string) error {
+	prCache := cache.NewCache(path)
+	if err := prCache.Load(); err != nil {
+		return err
+	}
+	fmt.Printf("PR cache path: %s\n", path)
+	if len(prCache.Entries) == 0 {
+		fmt.Println("No cached PR queries.")
+		return nil
+	}
+
+	keys := make([]string, 0, len(prCache.Entries))
+	for key := range prCache.Entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	fmt.Printf("Cached PR queries: %d\n", len(keys))
+	for _, key := range keys {
+		entry := prCache.Entries[key]
+		query := entry.Query
+		if query == "" {
+			query = key
+		}
+		fmt.Printf("- %s\n", query)
+		fmt.Printf("  PRs: %d\n", len(entry.PRs))
+		fmt.Printf("  SAML errors: %d\n", len(entry.SAMLErrors))
+		if entry.LastUpdated.IsZero() {
+			fmt.Println("  Last updated: unknown")
+		} else {
+			fmt.Printf("  Last updated: %s\n", entry.LastUpdated.Format(time.RFC3339))
+		}
+	}
+	return nil
 }
 
 func runDemo(args []string) {
@@ -305,7 +441,7 @@ func promptForAuth() {
 	os.Exit(1)
 }
 
-func runTUI() {
+func runTUI(opts tuiOptions) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -336,8 +472,24 @@ func runTUI() {
 		os.Exit(1)
 	}
 	sessionStore := session.NewStore(historyPath)
+	disableCache := cacheDisabled(opts, cfg)
 
-	m := tui.NewModel(ghClient, sessionMgr, sessionStore, cfg)
+	var prCache *cache.Cache
+	if !disableCache {
+		cachePath, err := config.CachePath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not determine PR cache path: %v\n", err)
+		} else {
+			prCache = cache.NewCache(cachePath)
+			if err := prCache.Load(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not load PR cache: %v\n", err)
+			}
+		}
+	}
+
+	m := tui.NewModelWithOptions(ghClient, sessionMgr, sessionStore, prCache, cfg, tui.ModelOptions{
+		DisableCache: disableCache,
+	})
 	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
