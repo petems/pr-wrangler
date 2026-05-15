@@ -124,11 +124,11 @@ func TestCachedClientCacheBehavior(t *testing.T) {
 				t.Fatalf("fetch calls = %d, want %d", fetcher.CallCount(), tt.wantCalls)
 			}
 			if len(steps) != len(tt.wantProgress) {
-				t.Fatalf("progress steps = %v, want %v", steps, tt.wantProgress)
+				t.Fatalf("progress step count = %d, want %d; steps = %v", len(steps), len(tt.wantProgress), steps)
 			}
 			for i := range tt.wantProgress {
 				if steps[i] != tt.wantProgress[i] {
-					t.Fatalf("progress steps = %v, want %v", steps, tt.wantProgress)
+					t.Fatalf("progress step %d = %v, want %v; all steps = %v", i, steps[i], tt.wantProgress[i], steps)
 				}
 			}
 		})
