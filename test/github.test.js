@@ -27,10 +27,10 @@ describe("parseHeaderMap", () => {
   });
 
   it("handles headers with colons in values", () => {
-    const raw = "Link: <https://api.github.com/repos?page=2>; rel=\"next\"";
+    const raw = 'Link: <https://api.github.com/repos?page=2>; rel="next"';
     const headers = parseHeaderMap(raw);
     expect(headers.get("link")).toBe(
-      "<https://api.github.com/repos?page=2>; rel=\"next\""
+      '<https://api.github.com/repos?page=2>; rel="next"',
     );
   });
 

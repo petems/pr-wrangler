@@ -46,7 +46,7 @@ archives:
       - LICENSE*
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 snapshot:
   version_template: "{{ .Tag }}-next"
@@ -56,22 +56,22 @@ changelog:
   use: github
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
       - Merge pull request
       - Merge branch
   groups:
-    - title: 'New Features'
+    - title: "New Features"
       regexp: '^.*feat(\([\w-]+\))?!?:.+$'
       order: 0
-    - title: 'Bug Fixes'
+    - title: "Bug Fixes"
       regexp: '^.*fix(\([\w-]+\))?!?:.+$'
       order: 1
-    - title: 'Enhancements'
+    - title: "Enhancements"
       regexp: '^.*enhancement(\([\w-]+\))?!?:.+$'
       order: 2
-    - title: 'Other Changes'
+    - title: "Other Changes"
       order: 999
 
 release:

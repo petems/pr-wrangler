@@ -26,7 +26,7 @@ pr-wrangler auth status   # show current token source and verify it
 pr-wrangler auth logout   # remove the stored token
 ```
 
-On first `auth login` you'll be asked for an OAuth App **Client ID**. To create one (one-time setup at https://github.com/settings/applications/new):
+On first `auth login` you'll be asked for an OAuth App **Client ID**. To create one (one-time setup at <https://github.com/settings/applications/new>):
 
 - Application name: anything (e.g. `pr-wrangler`)
 - Homepage URL: any URL
@@ -97,12 +97,12 @@ Files written to the config dir:
 
 Set `color_scheme` to one of the following values (default: `default`):
 
-| Value | Description |
-|---|---|
-| `default` | Classic dark-terminal green/cyan palette |
-| `dracula` | Purple/pink accents inspired by the Dracula theme |
-| `solarized` | Blue/cyan palette inspired by Solarized Dark |
-| `nord` | Blue-gray/frost/aurora palette from the Nord theme |
+| Value       | Description                                        |
+| ----------- | -------------------------------------------------- |
+| `default`   | Classic dark-terminal green/cyan palette           |
+| `dracula`   | Purple/pink accents inspired by the Dracula theme  |
+| `solarized` | Blue/cyan palette inspired by Solarized Dark       |
+| `nord`      | Blue-gray/frost/aurora palette from the Nord theme |
 
 ### Query warnings
 
@@ -142,11 +142,11 @@ The mock data covers a representative slice of states: open/draft PRs, passing/f
 
 There are three complementary capture flows, all driven by the same demo binary:
 
-| Output | How | When to use |
-|---|---|---|
-| `preview.txt` | `pr-wrangler demo --render > preview.txt` | Fast text snapshot for diffs, PR comments, and agentic flows that consume ANSI directly. |
-| `preview.png` / `preview.svg` | `make preview-image` (uses [`freeze`](https://github.com/charmbracelet/freeze)) | README hero images, blog posts, talk slides — anywhere a static image renders better than ANSI. |
-| `demo.gif` | `make preview-gif` (uses [`vhs`](https://github.com/charmbracelet/vhs) with `demo.tape`) | Animated walkthrough for the README header and onboarding docs. |
+| Output                        | How                                                                                      | When to use                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `preview.txt`                 | `pr-wrangler demo --render > preview.txt`                                                | Fast text snapshot for diffs, PR comments, and agentic flows that consume ANSI directly.        |
+| `preview.png` / `preview.svg` | `make preview-image` (uses [`freeze`](https://github.com/charmbracelet/freeze))          | README hero images, blog posts, talk slides — anywhere a static image renders better than ANSI. |
+| `demo.gif`                    | `make preview-gif` (uses [`vhs`](https://github.com/charmbracelet/vhs) with `demo.tape`) | Animated walkthrough for the README header and onboarding docs.                                 |
 
 Agents (Claude Code, Codex, etc.) can run any of the targets above and read the resulting files directly — `preview.png` is most reliable for visual verification because no ANSI-aware rendering is required.
 
@@ -195,6 +195,7 @@ PR Wrangler gracefully handles repositories protected by organizational SAML aut
 - **Graceful Degradation**: Successfully loaded PRs are displayed alongside SAML-protected ones, allowing you to work with accessible PRs while handling authorization separately
 
 **Usage Flow:**
+
 1. Launch PR Wrangler - SAML-protected PRs will appear with "SAML Auth Required" status
 2. Select a SAML-protected PR and press `a` to authorize
 3. Complete the SAML authentication flow in your browser

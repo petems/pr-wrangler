@@ -273,25 +273,27 @@ async function watchForComments(context, options) {
   const filterDesc = getWatchFilterDesc();
 
   console.log(
-    `\n${colors.bright}=== PR Comments Watch Mode ===${colors.reset}`
+    `\n${colors.bright}=== PR Comments Watch Mode ===${colors.reset}`,
   );
   console.log(`${colors.dim}PR #${prNumber}: ${prUrl}${colors.reset}`);
   console.log(
-    `${colors.dim}Polling every ${options.watchInterval}s, exit after ${options.watchTimeout}s of inactivity${colors.reset}`
+    `${colors.dim}Polling every ${options.watchInterval}s, exit after ${options.watchTimeout}s of inactivity${colors.reset}`,
   );
   console.log(
-    `${colors.dim}Filters: ${filterDesc}, ${options.filter || "all comments"}${colors.reset}`
+    `${colors.dim}Filters: ${filterDesc}, ${options.filter || "all comments"}${
+      colors.reset
+    }`,
   );
-  console.log(
-    `${colors.dim}Started at ${formatTimestamp()}${colors.reset}\n`
-  );
+  console.log(`${colors.dim}Started at ${formatTimestamp()}${colors.reset}\n`);
 
   // Initial fetch to populate seen IDs
   const [initialData, initialResolutionMap] = await Promise.all([
     fetchPRComments(owner, repo, prNumber, token, proxyFetch),
     fetchThreadResolutionMap(owner, repo, prNumber, token, proxyFetch),
   ]);
-  const initialProcessed = processComments(initialData, { resolutionMap: initialResolutionMap });
+  const initialProcessed = processComments(initialData, {
+    resolutionMap: initialResolutionMap,
+  });
   const initialFiltered = filterComments(initialProcessed, options);
 
   for (const comment of initialFiltered) {
@@ -299,7 +301,9 @@ async function watchForComments(context, options) {
   }
 
   console.log(
-    `${colors.dim}[${formatTimestamp()}] Initial state: ${initialFiltered.length} existing comments tracked${colors.reset}`
+    `${colors.dim}[${formatTimestamp()}] Initial state: ${
+      initialFiltered.length
+    } existing comments tracked${colors.reset}`,
   );
 
   if (initialFiltered.length > 0) {
@@ -325,7 +329,11 @@ async function watchForComments(context, options) {
       filtered = filterComments(processed, options);
     } catch (error) {
       console.log(
-        `${colors.yellow}[${formatTimestamp()}] Poll #${pollCount}: Error fetching comments: ${error.message}${colors.reset}`
+        `${
+          colors.yellow
+        }[${formatTimestamp()}] Poll #${pollCount}: Error fetching comments: ${
+          error.message
+        }${colors.reset}`,
       );
       continue;
     }
@@ -339,15 +347,19 @@ async function watchForComments(context, options) {
       }
 
       console.log(
-        `\n${colors.green}=== NEW COMMENTS DETECTED [${formatTimestamp()}] ===${colors.reset}`
+        `\n${colors.green}=== NEW COMMENTS DETECTED [${formatTimestamp()}] ===${
+          colors.reset
+        }`,
       );
       console.log(
-        `${colors.bright}Found ${newComments.length} new comment${newComments.length === 1 ? "" : "s"}${colors.reset}`
+        `${colors.bright}Found ${newComments.length} new comment${
+          newComments.length === 1 ? "" : "s"
+        }${colors.reset}`,
       );
 
       // Brief grace period to catch any stragglers from the same bot batch
       console.log(
-        `${colors.dim}Waiting 5s for additional comments...${colors.reset}`
+        `${colors.dim}Waiting 5s for additional comments...${colors.reset}`,
       );
       await sleep(5);
 
@@ -358,12 +370,16 @@ async function watchForComments(context, options) {
           fetchPRComments(owner, repo, prNumber, token, proxyFetch),
           fetchThreadResolutionMap(owner, repo, prNumber, token, proxyFetch),
         ]);
-        const graceProcessed = processComments(graceData, { resolutionMap: graceResolutionMap });
+        const graceProcessed = processComments(graceData, {
+          resolutionMap: graceResolutionMap,
+        });
         const graceFiltered = filterComments(graceProcessed, options);
         lateComments = graceFiltered.filter((c) => !seenIds.has(c.id));
       } catch (error) {
         console.log(
-          `${colors.yellow}[${formatTimestamp()}] Grace period fetch failed: ${error.message}${colors.reset}`
+          `${colors.yellow}[${formatTimestamp()}] Grace period fetch failed: ${
+            error.message
+          }${colors.reset}`,
         );
       }
 
@@ -374,7 +390,9 @@ async function watchForComments(context, options) {
 
       if (lateComments.length > 0) {
         console.log(
-          `${colors.bright}Caught ${lateComments.length} additional comment${lateComments.length === 1 ? "" : "s"}${colors.reset}`
+          `${colors.bright}Caught ${lateComments.length} additional comment${
+            lateComments.length === 1 ? "" : "s"
+          }${colors.reset}`,
         );
       }
 
@@ -391,30 +409,34 @@ async function watchForComments(context, options) {
 
       // Exit immediately so the caller can process and restart if needed
       console.log(
-        `\n${colors.green}=== WATCH: EXITING WITH NEW COMMENTS ===${colors.reset}`
+        `\n${colors.green}=== WATCH: EXITING WITH NEW COMMENTS ===${colors.reset}`,
       );
       console.log(
-        `${colors.dim}Restart watcher after processing to catch further comments.${colors.reset}`
+        `${colors.dim}Restart watcher after processing to catch further comments.${colors.reset}`,
       );
       return;
     } else {
       const inactiveSeconds = Math.round(
-        (Date.now() - lastActivityTime) / 1000
+        (Date.now() - lastActivityTime) / 1000,
       );
       console.log(
-        `${colors.dim}[${formatTimestamp()}] Poll #${pollCount}: No new comments (${inactiveSeconds}s/${options.watchTimeout}s idle)${colors.reset}`
+        `${
+          colors.dim
+        }[${formatTimestamp()}] Poll #${pollCount}: No new comments (${inactiveSeconds}s/${
+          options.watchTimeout
+        }s idle)${colors.reset}`,
       );
 
       if (inactiveSeconds >= options.watchTimeout) {
         console.log(`\n${colors.green}=== WATCH COMPLETE ===${colors.reset}`);
         console.log(
-          `${colors.dim}No new comments after ${options.watchTimeout}s of inactivity.${colors.reset}`
+          `${colors.dim}No new comments after ${options.watchTimeout}s of inactivity.${colors.reset}`,
         );
         console.log(
-          `${colors.dim}Total comments tracked: ${seenIds.size}${colors.reset}`
+          `${colors.dim}Total comments tracked: ${seenIds.size}${colors.reset}`,
         );
         console.log(
-          `${colors.dim}Exiting at ${formatTimestamp()}${colors.reset}`
+          `${colors.dim}Exiting at ${formatTimestamp()}${colors.reset}`,
         );
         return;
       }
@@ -445,7 +467,7 @@ async function main() {
   if (!token) {
     console.error(`${colors.red}Error: GitHub token not found${colors.reset}`);
     console.error(
-      "Set GITHUB_TOKEN env var, or authenticate with: gh auth login"
+      "Set GITHUB_TOKEN env var, or authenticate with: gh auth login",
     );
     process.exit(1);
   }
@@ -454,7 +476,7 @@ async function main() {
   const repoInfo = getRepoInfo();
   if (!repoInfo) {
     console.error(
-      `${colors.red}Error: Could not determine repository from git remote${colors.reset}`
+      `${colors.red}Error: Could not determine repository from git remote${colors.reset}`,
     );
     process.exit(1);
   }
@@ -467,7 +489,7 @@ async function main() {
     const branch = getCurrentBranch();
     if (!branch) {
       console.error(
-        `${colors.red}Error: Could not determine current branch${colors.reset}`
+        `${colors.red}Error: Could not determine current branch${colors.reset}`,
       );
       process.exit(1);
     }
@@ -477,11 +499,11 @@ async function main() {
       repoInfo.repo,
       branch,
       token,
-      proxyFetch
+      proxyFetch,
     );
     if (!pr) {
       console.error(
-        `${colors.red}Error: No open PR found for branch '${branch}'${colors.reset}`
+        `${colors.red}Error: No open PR found for branch '${branch}'${colors.reset}`,
       );
       process.exit(1);
     }
@@ -499,7 +521,7 @@ async function main() {
   if (options.command === "reply") {
     if (!(options.replyTo && options.replyMessage)) {
       console.error(
-        `${colors.red}Error: --reply requires comment ID and message${colors.reset}`
+        `${colors.red}Error: --reply requires comment ID and message${colors.reset}`,
       );
       console.error('Usage: pr-wrangler-reviews --reply <id> "message"');
       process.exit(1);
@@ -512,15 +534,13 @@ async function main() {
       options.replyTo,
       options.replyMessage,
       token,
-      proxyFetch
+      proxyFetch,
     );
 
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else {
-      console.log(
-        `${colors.green}✓ Reply posted successfully${colors.reset}`
-      );
+      console.log(`${colors.green}✓ Reply posted successfully${colors.reset}`);
       console.log(`  ${colors.dim}${result.html_url}${colors.reset}`);
     }
 
@@ -532,27 +552,23 @@ async function main() {
           prNumber,
           options.replyTo,
           token,
-          proxyFetch
+          proxyFetch,
         );
 
         if (!options.json) {
           if (resolveResult.resolved) {
-            console.log(
-              `${colors.green}✓ Thread resolved${colors.reset}`
-            );
+            console.log(`${colors.green}✓ Thread resolved${colors.reset}`);
           } else if (resolveResult.alreadyResolved) {
-            console.log(
-              `${colors.dim}Thread already resolved${colors.reset}`
-            );
+            console.log(`${colors.dim}Thread already resolved${colors.reset}`);
           } else if (resolveResult.skipped) {
             console.log(
-              `${colors.dim}Thread resolution skipped (${resolveResult.reason})${colors.reset}`
+              `${colors.dim}Thread resolution skipped (${resolveResult.reason})${colors.reset}`,
             );
           }
         }
       } catch (error) {
         console.warn(
-          `${colors.yellow}Reply posted, but thread resolution failed: ${error.message}${colors.reset}`
+          `${colors.yellow}Reply posted, but thread resolution failed: ${error.message}${colors.reset}`,
         );
       }
     }
@@ -564,14 +580,26 @@ async function main() {
   if (options.command === "detail") {
     if (!options.detail) {
       console.error(
-        `${colors.red}Error: --detail requires a comment ID${colors.reset}`
+        `${colors.red}Error: --detail requires a comment ID${colors.reset}`,
       );
       process.exit(1);
     }
 
     const [rawData, resolutionMap] = await Promise.all([
-      fetchPRComments(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
-      fetchThreadResolutionMap(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+      fetchPRComments(
+        repoInfo.owner,
+        repoInfo.repo,
+        prNumber,
+        token,
+        proxyFetch,
+      ),
+      fetchThreadResolutionMap(
+        repoInfo.owner,
+        repoInfo.repo,
+        prNumber,
+        token,
+        proxyFetch,
+      ),
     ]);
     const processed = processComments(rawData, { resolutionMap });
     const targetId = Number(options.detail);
@@ -579,7 +607,7 @@ async function main() {
 
     if (!comment) {
       console.error(
-        `${colors.red}Error: Comment ${options.detail} not found in PR #${prNumber}${colors.reset}`
+        `${colors.red}Error: Comment ${options.detail} not found in PR #${prNumber}${colors.reset}`,
       );
       process.exit(1);
     }
@@ -597,7 +625,7 @@ async function main() {
   if (options.command === "watch") {
     await watchForComments(
       { owner: repoInfo.owner, repo: repoInfo.repo, prNumber, prUrl, token },
-      options
+      options,
     );
     return;
   }
@@ -605,14 +633,19 @@ async function main() {
   // Default: fetch and display comments
   const [rawData, resolutionMap] = await Promise.all([
     fetchPRComments(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
-    fetchThreadResolutionMap(repoInfo.owner, repoInfo.repo, prNumber, token, proxyFetch),
+    fetchThreadResolutionMap(
+      repoInfo.owner,
+      repoInfo.repo,
+      prNumber,
+      token,
+      proxyFetch,
+    ),
   ]);
 
   const processed = processComments(rawData, { resolutionMap });
   const filtered = filterComments(processed, options);
 
   console.log(formatOutput(filtered, options));
-
 }
 
 main().catch((error) => {
