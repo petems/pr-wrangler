@@ -165,16 +165,13 @@ func NewStyles(name string) Styles {
 		TitleText: lipgloss.NewStyle().
 			Foreground(scheme.TitleText),
 		Success: lipgloss.NewStyle().
-			Foreground(scheme.Success).
-			Bold(true),
+			Foreground(scheme.Success),
 		Info: lipgloss.NewStyle().
 			Foreground(scheme.Info),
 		Review: lipgloss.NewStyle().
-			Foreground(scheme.Review).
-			Bold(true),
+			Foreground(scheme.Review),
 		Conflict: lipgloss.NewStyle().
-			Foreground(scheme.Conflict).
-			Bold(true),
+			Foreground(scheme.Conflict),
 		Draft: lipgloss.NewStyle().
 			Foreground(scheme.Draft),
 		Title: lipgloss.NewStyle().
@@ -197,8 +194,7 @@ func NewStyles(name string) Styles {
 			Foreground(scheme.Secondary),
 		SelectedRow: lipgloss.NewStyle().
 			Foreground(scheme.TableText).
-			Background(scheme.SelectedBg).
-			Bold(true),
+			Background(scheme.SelectedBg),
 		Indicator: lipgloss.NewStyle().
 			Foreground(scheme.Primary).
 			Bold(true),

@@ -1167,18 +1167,10 @@ func (m Model) renderTable() string {
 
 func (m Model) columnHeaderStyle(col int) lipgloss.Style {
 	switch col {
-	case 1:
-		return m.styles.Repo.Bold(true)
 	case 2:
 		return m.styles.Number.Bold(true)
 	case 3:
 		return m.styles.TitleText.Bold(true)
-	case 4, 5:
-		return m.styles.Header
-	case 6:
-		return m.styles.Header
-	case 7:
-		return m.styles.HelpCategory
 	default:
 		return m.styles.Header
 	}
@@ -1187,7 +1179,7 @@ func (m Model) columnHeaderStyle(col int) lipgloss.Style {
 func (m Model) columnBodyStyle(r PRRow, col int) lipgloss.Style {
 	switch col {
 	case 1:
-		return m.styles.Repo
+		return m.styles.Help
 	case 2:
 		return m.styles.Number
 	case 3:
@@ -1233,7 +1225,7 @@ func (m Model) actionStyle(action github.Action) lipgloss.Style {
 	case github.ActionResolveConflicts:
 		return m.styles.Conflict
 	case github.ActionInvestigate, github.ActionAuthorizeSAML:
-		return m.styles.Info.Bold(true)
+		return m.styles.Info
 	default:
 		return m.styles.Help
 	}
