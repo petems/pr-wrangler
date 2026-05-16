@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -958,4 +959,148 @@ func stripANSI(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func viewPickerKeyPress() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})
+}
+
+func newMultiViewModel(t *testing.T, n int) Model {
+	t.Helper()
+	cfg := config.DefaultConfig()
+	cfg.Views = make([]config.View, n)
+	for i := 0; i < n; i++ {
+		cfg.Views[i] = config.View{Name: fmt.Sprintf("view-%d", i), Query: fmt.Sprintf("q-%d", i)}
+	}
+	return NewModel(nil, nil, nil, nil, cfg)
+}
+
+func TestViewPicker_OpensAtActiveView(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 2
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	if !m.showViewPicker {
+		t.Fatal("expected picker to be open")
+	}
+	if m.viewPickerIndex != 2 {
+		t.Errorf("viewPickerIndex: got %d, want 2", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_SingleViewIsNoop(t *testing.T) {
+	m := newMultiViewModel(t, 1)
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	if m.showViewPicker {
+		t.Error("picker should not open with only one view")
+	}
+}
+
+func TestViewPicker_NavigationBounded(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyUp))
+	if m.viewPickerIndex != 0 {
+		t.Errorf("up at index 0 should be a no-op, got %d", m.viewPickerIndex)
+	}
+
+	for i := 0; i < 5; i++ {
+		m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	}
+	if m.viewPickerIndex != 2 {
+		t.Errorf("after over-scroll down: got %d, want 2", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_EnterCommitsAndFetches(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+	m.selected = 5
+	m.allRows = make([]PRRow, 10)
+	m.rows = m.allRows
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.showViewPicker {
+		t.Error("picker should be closed after enter")
+	}
+	if next.activeViewIndex != 2 {
+		t.Errorf("activeViewIndex: got %d, want 2", next.activeViewIndex)
+	}
+	if next.selected != 0 {
+		t.Errorf("selected: got %d, want 0", next.selected)
+	}
+	if !next.loading {
+		t.Error("expected loading=true after view switch")
+	}
+	if cmd == nil {
+		t.Fatal("expected fetch cmd, got nil")
+	}
+}
+
+func TestViewPicker_EnterOnActiveViewIsNoFetch(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 1
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.showViewPicker {
+		t.Error("picker should be closed")
+	}
+	if cmd != nil {
+		t.Error("expected no fetch when re-selecting active view")
+	}
+}
+
+func TestViewPicker_EscCancels(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyEsc))
+
+	if m.showViewPicker {
+		t.Error("picker should be closed after esc")
+	}
+	if m.activeViewIndex != 0 {
+		t.Errorf("activeViewIndex changed to %d after cancel", m.activeViewIndex)
+	}
+}
+
+func TestConfiguredQuery_UsesActiveViewIndex(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+
+	m.activeViewIndex = 0
+	if got, want := m.configuredQuery(), "q-0"; got != want {
+		t.Errorf("active=0: got %q, want %q", got, want)
+	}
+	m.activeViewIndex = 2
+	if got, want := m.configuredQuery(), "q-2"; got != want {
+		t.Errorf("active=2: got %q, want %q", got, want)
+	}
+	m.activeViewIndex = 99
+	if got := m.configuredQuery(); got != "" {
+		t.Errorf("out-of-range index should return \"\", got %q", got)
+	}
+	m.activeViewIndex = -1
+	if got := m.configuredQuery(); got != "" {
+		t.Errorf("negative index should return \"\", got %q", got)
+	}
 }

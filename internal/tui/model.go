@@ -73,6 +73,11 @@ type Model struct {
 	showThemePicker  bool
 	themePickerIndex int
 
+	// View picker overlay state (mirrors theme picker).
+	activeViewIndex int
+	showViewPicker  bool
+	viewPickerIndex int
+
 	notification string
 
 	// Sessions
@@ -113,18 +118,19 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 	}
 
 	m := Model{
-		ghClient:      ghClient,
-		cachedClient:  github.NewCachedClient(ghClient, cacheTTL),
-		sessionMgr:    sessionMgr,
-		sessionStore:  sessionStore,
-		cache:         prCache,
-		cacheDisabled: opts.DisableCache,
-		config:        cfg,
-		styles:        styles,
-		loading:       true,
-		spinner:       s,
-		prSessions:    make(map[int]tmux.PRSession),
-		browserOpener: defaultOpenBrowser,
+		ghClient:        ghClient,
+		cachedClient:    github.NewCachedClient(ghClient, cacheTTL),
+		sessionMgr:      sessionMgr,
+		sessionStore:    sessionStore,
+		cache:           prCache,
+		cacheDisabled:   opts.DisableCache,
+		config:          cfg,
+		styles:          styles,
+		loading:         true,
+		spinner:         s,
+		prSessions:      make(map[int]tmux.PRSession),
+		browserOpener:   defaultOpenBrowser,
+		activeViewIndex: 0,
 	}
 
 	if !opts.DisableCache && prCache != nil {
@@ -154,6 +160,16 @@ func NewDemoModel(cfg config.Config, count int) Model {
 	s.Style = styles.Loading
 
 	rows, samlErrors := buildDemoRows(count)
+
+	// Ensure the demo always has multiple views so the picker overlay and
+	// header indicator are exercised by the preview pipeline.
+	if len(cfg.Views) < 2 {
+		cfg.Views = []config.View{
+			{Name: "My PRs", Query: "author:@me is:open", Default: true},
+			{Name: "Review Requested", Query: "review-requested:@me is:open"},
+			{Name: "Org PRs", Query: "org:example is:open is:pr"},
+		}
+	}
 
 	return Model{
 		config:        cfg,
@@ -234,6 +250,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "?", "esc":
 				m.showHelp = false
+			}
+			return m, nil
+		}
+
+		// While the view picker is open, intercept all keys so the table
+		// (and other shortcuts) don't see them.
+		if m.showViewPicker {
+			switch msg.String() {
+			case "up":
+				if m.viewPickerIndex > 0 {
+					m.viewPickerIndex--
+				}
+			case "down":
+				if m.viewPickerIndex < len(m.config.Views)-1 {
+					m.viewPickerIndex++
+				}
+			case "enter":
+				m.showViewPicker = false
+				if m.viewPickerIndex == m.activeViewIndex {
+					return m, nil
+				}
+				m.activeViewIndex = m.viewPickerIndex
+				return m, m.switchToActiveView()
+			case "esc":
+				m.showViewPicker = false
 			}
 			return m, nil
 		}
@@ -338,6 +379,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "v":
+			if len(m.config.Views) <= 1 {
+				return m, nil
+			}
+			m.showViewPicker = true
+			m.viewPickerIndex = m.activeViewIndex
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -435,6 +483,25 @@ func (m Model) renderThemePicker() string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
+func (m Model) renderViewPicker() string {
+	lines := make([]string, 0, len(m.config.Views)+3)
+	lines = append(lines, m.styles.HelpCategory.Render("Select View"))
+	for i, view := range m.config.Views {
+		label := view.Name
+		if view.Query != "" {
+			label = fmt.Sprintf("%s  %s", view.Name, m.styles.Help.Render("("+view.Query+")"))
+		}
+		if i == m.viewPickerIndex {
+			lines = append(lines, m.styles.Indicator.Render("> ")+m.styles.SelectedRow.Render(label))
+		} else {
+			lines = append(lines, "  "+m.styles.Help.Render(label))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
 const cowsayDashboard = "" +
 	" _______________________________________\n" +
@@ -460,6 +527,10 @@ func (m Model) viewContent() string {
 	var b strings.Builder
 	b.WriteString(cowsayDashboard + "\n\n")
 	b.WriteString(m.styles.Title.Render("PR Wrangler"))
+	if len(m.config.Views) > 1 && m.activeViewIndex >= 0 && m.activeViewIndex < len(m.config.Views) {
+		name := m.config.Views[m.activeViewIndex].Name
+		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [view: %s (%d/%d)]", name, m.activeViewIndex+1, len(m.config.Views))))
+	}
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
@@ -499,6 +570,11 @@ func (m Model) viewContent() string {
 	if m.showThemePicker {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderThemePicker())
+	}
+
+	if m.showViewPicker {
+		b.WriteString("\n\n")
+		b.WriteString(m.renderViewPicker())
 	}
 
 	return b.String()
@@ -695,12 +771,16 @@ func centerLine(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-// configuredQuery returns the user's configured search query, or "" if none.
+// configuredQuery returns the active view's search query, or "" if no
+// views are configured or the active index is out of range.
 func (m Model) configuredQuery() string {
 	if len(m.config.Views) == 0 {
 		return ""
 	}
-	return m.config.Views[0].Query
+	if m.activeViewIndex < 0 || m.activeViewIndex >= len(m.config.Views) {
+		return ""
+	}
+	return m.config.Views[m.activeViewIndex].Query
 }
 
 // progressBarWidth picks a sensible bar width for the given terminal width.
@@ -738,6 +818,19 @@ func (m *Model) refreshCmd() tea.Cmd {
 
 func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
 	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache)
+}
+
+// switchToActiveView clears table state and kicks off a fetch for the
+// active view's query. Used after the view picker commits a change.
+func (m *Model) switchToActiveView() tea.Cmd {
+	m.selected = 0
+	m.allRows = nil
+	m.rows = nil
+	m.samlErrors = nil
+	m.lastError = nil
+	m.loading = true
+	m.refreshing = false
+	return m.fetchPRsCmd(false)
 }
 
 func (m *Model) discoverSessionsCmd() tea.Cmd {
@@ -1018,6 +1111,7 @@ var helpEntries = []helpEntry{
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
+	{"v", "v", "switch view", "open the view picker to switch between configured views"},
 	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
 }
