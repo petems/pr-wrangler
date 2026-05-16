@@ -186,9 +186,22 @@ jobs:
         # rasterising SVG → PNG. When `rsvg-convert` is on PATH,
         # freeze prefers it and bypasses the WASM renderer entirely.
         # See https://github.com/charmbracelet/freeze/issues/203
+        #
+        # fonts-jetbrains-mono is required for column alignment in the
+        # rasterised PNG. freeze generates SVG with `font-family="JetBrains
+        # Mono"` and embeds the regular weight as a base64 woff2 in an
+        # @font-face block. rsvg-convert does not load base64 woff2 from
+        # @font-face — it resolves the font name via fontconfig and falls
+        # back to a system monospace if JetBrains Mono is not installed.
+        # The fallback's bold (header row) vs regular (body rows) glyph
+        # metrics differ, so column dividers drift apart across the wide
+        # PR-wrangler table. Installing JetBrains Mono and refreshing the
+        # font cache makes rsvg-convert match the font freeze declared,
+        # restoring alignment.
         run: |
           sudo apt-get update
-          sudo apt-get install -y librsvg2-bin
+          sudo apt-get install -y librsvg2-bin fonts-jetbrains-mono
+          fc-cache -f
           go install github.com/charmbracelet/freeze@v0.2.2
 
       - name: Render preview to PNG and SVG
