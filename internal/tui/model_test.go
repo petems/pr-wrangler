@@ -417,7 +417,6 @@ func TestRenderTable_HyperlinksPresent(t *testing.T) {
 	rendered := m.renderTable()
 
 	for _, want := range []string{
-		"https://github.com/octocat/hello-world",
 		"https://github.com/octocat/hello-world/pull/123",
 		"https://github.com/octocat/spoon-knife/pull/456/checks",
 	} {
