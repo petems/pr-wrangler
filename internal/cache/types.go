@@ -23,6 +23,8 @@ type CachedSAMLErrorEntry struct {
 	Index             int    `json:"index"`
 	RepoNameWithOwner string `json:"repo_name_with_owner,omitempty"`
 	PRNumber          int    `json:"pr_number,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
+	UpdatedAt         string `json:"updated_at,omitempty"`
 	Message           string `json:"message,omitempty"`
 	AuthURL           string `json:"auth_url,omitempty"`
 }
@@ -40,6 +42,8 @@ func ToSAMLErrorEntries(cached []CachedSAMLErrorEntry) []github.SAMLErrorEntry {
 			Index:             c.Index,
 			RepoNameWithOwner: c.RepoNameWithOwner,
 			PRNumber:          c.PRNumber,
+			CreatedAt:         parseCachedTime(c.CreatedAt),
+			UpdatedAt:         parseCachedTime(c.UpdatedAt),
 			Err: &github.SAMLAuthError{
 				Message: c.Message,
 				AuthURL: c.AuthURL,
@@ -61,6 +65,8 @@ func fromSAMLErrorEntries(entries []github.SAMLErrorEntry) []CachedSAMLErrorEntr
 			Index:             e.Index,
 			RepoNameWithOwner: e.RepoNameWithOwner,
 			PRNumber:          e.PRNumber,
+			CreatedAt:         formatCachedTime(e.CreatedAt),
+			UpdatedAt:         formatCachedTime(e.UpdatedAt),
 		}
 		if e.Err != nil {
 			ce.Message = e.Err.Message
@@ -69,6 +75,24 @@ func fromSAMLErrorEntries(entries []github.SAMLErrorEntry) []CachedSAMLErrorEntr
 		out[i] = ce
 	}
 	return out
+}
+
+func parseCachedTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func formatCachedTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 // Cache persists per-query PR results to disk as JSON. The file path is

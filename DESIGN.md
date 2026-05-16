@@ -55,13 +55,14 @@ rather than inventing new layers.
 **Dashboard** (persistent)
 
 1. Cowsay header + title
-2. Query warning line (only when the resolved query differs from the user's
+2. Metadata line showing sort mode, configured query, and active search
+3. Query warning line (only when the resolved query differs from the user's
    expectation)
-3. PR table — fixed columns plus a flexible title column
-4. Page indicator
-5. Error line (only when `lastError != nil`)
-6. Notification line (transient; cleared on next state change)
-7. Help line (one-line key reminder)
+4. PR table — fixed columns plus a flexible title column
+5. Page indicator
+6. Error line (only when `lastError != nil`)
+7. Notification line (transient; cleared on next state change)
+8. Help line or active `/` search prompt
 
 **Overlays** (rendered on top, intercept input)
 
@@ -76,6 +77,12 @@ the dashboard does not handle it.
 
 - **Keyboard-first.** Every action has a visible binding in the one-line
   help footer and in the `?` overlay. Mouse handling is not a goal.
+- **Priority-first triage.** The default table order is action priority:
+  fix CI, rebase/resolve conflicts, address feedback or review comments,
+  approved mergeable PRs, then waiting/open/draft work. Users can cycle to
+  non-priority sort orders with `s`, including newest and oldest updated PRs.
+- **Search narrows the work queue.** `/` opens a Vim-style search prompt that
+  filters visible rows by repo, PR number, title, branch, status, or action.
 - **Stable selection.** Refresh (`r`) preserves the selected row when
   possible; this is part of the `prsLoadedMsg` contract.
 - **Async work belongs in `tea.Cmd`.** The `Update` loop must never block.
@@ -124,14 +131,14 @@ Each entry in `colorSchemes` must populate every token.
   preview pipeline before they ship — including a contrast pass against the
   `Help` and `Error` colors, which are the easiest to mis-tune.
 - Column color is structural, not decorative. Repository, PR number, title,
-  status, and action columns can use distinct token colors to improve scanning,
-  but the text labels remain the source of truth.
+  created-at, updated-at, status, and action columns can use distinct token
+  colors to improve scanning, but the text labels remain the source of truth.
 - Bold is a primary cue, not a decoration. Reserve it for selection,
   banners, and section heads.
 
 ## Layout & Responsiveness
 
-- Fixed columns reserve roughly 82 cols of horizontal space; the title
+- Fixed columns reserve roughly 110 cols of horizontal space; the title
   column absorbs the remainder via `titleColumnWidth()` in
   [`internal/tui/model.go`](./internal/tui/model.go).
 - Page size is derived from terminal height. `pageBounds()` keeps the

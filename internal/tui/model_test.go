@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/petems/pr-wrangler/internal/cache"
@@ -23,6 +25,11 @@ func sendKey(t *testing.T, m Model, key tea.KeyPressMsg) Model {
 
 func themePickerKeyPress() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Text: "t", Code: 't'})
+}
+
+func textKeyPress(text string) tea.KeyPressMsg {
+	r, _ := utf8.DecodeRuneInString(text)
+	return tea.KeyPressMsg(tea.Key{Text: text, Code: r})
 }
 
 func specialKeyPress(code rune) tea.KeyPressMsg {
@@ -191,6 +198,153 @@ func TestHelpOverlay_InterceptsDashboardKeys(t *testing.T) {
 	if m.showHelp {
 		t.Fatal("expected esc to close help overlay")
 	}
+}
+
+func TestApplyFilters_DefaultPrioritySortsWorkQueue(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Waiting", github.PRStatusWaitingForReviews, github.ActionNone),
+		testRow(2, "Approved", github.PRStatusApproved, github.ActionMerge),
+		testRow(3, "Feedback", github.PRStatusChangesRequested, github.ActionAddressFeedback),
+		testRow(4, "Rebase", github.PRStatusHasConflicts, github.ActionResolveConflicts),
+		testRow(5, "Draft", github.PRStatusDraft, github.ActionNone),
+		testRow(6, "CI", github.PRStatusCIFailing, github.ActionFixCI),
+	}
+
+	m.applyFilters()
+
+	got := rowNumbers(m.rows)
+	want := []int{6, 4, 3, 2, 1, 5}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("priority order = %v, want %v", got, want)
+	}
+}
+
+func TestSortKeyCyclesSortMode(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(2, "B", github.PRStatusOpen, github.ActionNone),
+		testRow(1, "A", github.PRStatusOpen, github.ActionNone),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("s"))
+
+	if m.sortMode != SortGitHub {
+		t.Fatalf("sort mode after s = %q, want %q", m.sortMode, SortGitHub)
+	}
+	if got, want := rowNumbers(m.rows), []int{2, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("GitHub order = %v, want %v", got, want)
+	}
+
+	m = sendKey(t, m, textKeyPress("s"))
+
+	if m.sortMode != SortRepo {
+		t.Fatalf("sort mode after second s = %q, want %q", m.sortMode, SortRepo)
+	}
+
+	for _, want := range []SortMode{SortPR, SortTitle, SortDateDesc, SortDateAsc, SortPriority} {
+		m = sendKey(t, m, textKeyPress("s"))
+		if m.sortMode != want {
+			t.Fatalf("sort mode after cycle = %q, want %q", m.sortMode, want)
+		}
+	}
+}
+
+func TestDateSortModesUseUpdatedAt(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	rows := []PRRow{
+		testRowWithUpdatedAt(1, "Old", now.Add(-3*time.Hour)),
+		testRowWithUpdatedAt(2, "New", now.Add(-1*time.Hour)),
+		testRowWithUpdatedAt(3, "Middle", now.Add(-2*time.Hour)),
+	}
+
+	sortRows(rows, SortDateDesc)
+	if got, want := rowNumbers(rows), []int{2, 3, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date newest order = %v, want %v", got, want)
+	}
+
+	sortRows(rows, SortDateAsc)
+	if got, want := rowNumbers(rows), []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date oldest order = %v, want %v", got, want)
+	}
+}
+
+func TestRenderTableShowsCreatedAndUpdatedColumns(t *testing.T) {
+	createdAt := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 16, 11, 45, 0, 0, time.UTC)
+	row := testRowWithUpdatedAt(1, "Dates are visible", updatedAt)
+	row.PR.CreatedAt = createdAt
+
+	m := Model{
+		styles: NewStyles("default"),
+		width:  180,
+		height: 40,
+		rows:   []PRRow{row},
+	}
+	rendered := m.renderTable()
+
+	for _, want := range []string{"Created At", "Updated At", formatTableTime(createdAt), formatTableTime(updatedAt)} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered table missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestSlashSearchFiltersRows(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Fix payment retry", github.PRStatusCIFailing, github.ActionFixCI),
+		testRow(2, "Document defaults", github.PRStatusWaitingForReviews, github.ActionNone),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("/"))
+	m = sendKey(t, m, textKeyPress("d"))
+	m = sendKey(t, m, textKeyPress("o"))
+	m = sendKey(t, m, textKeyPress("c"))
+	m = sendKey(t, m, specialKeyPress(tea.KeyEnter))
+
+	if m.searchActive {
+		t.Fatal("search should close after enter")
+	}
+	if m.searchQuery != "doc" {
+		t.Fatalf("search query = %q, want %q", m.searchQuery, "doc")
+	}
+	if got, want := rowNumbers(m.rows), []int{2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered rows = %v, want %v", got, want)
+	}
+	if !strings.Contains(m.View().Content, "[sort: priority | query: author:@me is:open | search: doc]") {
+		t.Fatal("view should render active sort and search metadata")
+	}
+}
+
+func testRowWithUpdatedAt(number int, title string, updatedAt time.Time) PRRow {
+	row := testRow(number, title, github.PRStatusOpen, github.ActionNone)
+	row.PR.UpdatedAt = updatedAt
+	return row
+}
+
+func testRow(number int, title string, status github.PRStatus, action github.Action) PRRow {
+	return PRRow{
+		PR: github.PR{
+			Number:            number,
+			Title:             title,
+			RepoNameWithOwner: "petems/pr-wrangler",
+			State:             github.PRStateOpen,
+		},
+		Status:  status,
+		Action:  action,
+		RowType: RowTypePR,
+	}
+}
+
+func rowNumbers(rows []PRRow) []int {
+	out := make([]int, len(rows))
+	for i, row := range rows {
+		out[i] = row.PR.Number
+	}
+	return out
 }
 
 func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
