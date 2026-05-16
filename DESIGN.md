@@ -130,9 +130,10 @@ Each entry in `colorSchemes` must populate every token.
 - New themes must populate every field and must be checked through the
   preview pipeline before they ship — including a contrast pass against the
   `Help` and `Error` colors, which are the easiest to mis-tune.
-- Column color is structural, not decorative. Repository, PR number, title,
-  created-at, updated-at, status, and action columns can use distinct token
-  colors to improve scanning, but the text labels remain the source of truth.
+- Column color is structural, not decorative. The table is intentionally
+  quiet: repository and date columns recede, PR number and title anchor the
+  row, and the strongest semantic colors are reserved for status and action.
+  Text labels remain the source of truth.
 - Bold is a primary cue, not a decoration. Reserve it for selection,
   banners, and section heads.
 
