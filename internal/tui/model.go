@@ -862,16 +862,12 @@ func (m Model) renderTable() string {
 		rows = append(rows, []string{indicator, repoCell, prCell, titleCell, statusCell, actionCell})
 
 		// Per-cell URLs. Empty string = no hyperlink for that cell.
-		repoURL := ""
-		if owner := r.PR.RepoNameWithOwner; owner != "" {
-			repoURL = "https://github.com/" + owner
-		}
 		prURL := r.PR.URL
 		statusURL := ""
 		if r.PR.URL != "" {
 			statusURL = r.PR.URL + "/checks"
 		}
-		urls = append(urls, []string{"", repoURL, prURL, prURL, statusURL, ""})
+		urls = append(urls, []string{"", "", prURL, "", statusURL, ""})
 	}
 
 	headers := []string{" ", "Repo", "PR", "Title", "Status", "Action"}
