@@ -72,6 +72,8 @@ func TestTableChromeLines_Audit(t *testing.T) {
 		t.Fatalf("renderTable() unexpectedly has a trailing newline; audit assumptions would be wrong")
 	}
 
+	// Reserve one line each for warning, error, and notification rows so
+	// transient chrome does not push the table below the visible viewport.
 	const transientReserve = 3
 	want := baseChrome + pageIndicatorLines + transientReserve
 	if tableChromeLines != want {
