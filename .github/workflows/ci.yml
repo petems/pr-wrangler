@@ -147,7 +147,10 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # contents:write is needed to push rendered images to the orphan
+      # `ci-preview-artifacts` branch so they can be embedded inline in
+      # the PR comment via raw.githubusercontent.com.
+      contents: write
       # Both issues:write AND pull-requests:write are required in practice
       # to POST /repos/{owner}/{repo}/issues/{issue_number}/comments on a
       # PR. GitHub returned 403 "Resource not accessible by integration"
@@ -183,9 +186,22 @@ jobs:
         # rasterising SVG → PNG. When `rsvg-convert` is on PATH,
         # freeze prefers it and bypasses the WASM renderer entirely.
         # See https://github.com/charmbracelet/freeze/issues/203
+        #
+        # fonts-jetbrains-mono is required for column alignment in the
+        # rasterised PNG. freeze generates SVG with `font-family="JetBrains
+        # Mono"` and embeds the regular weight as a base64 woff2 in an
+        # @font-face block. rsvg-convert does not load base64 woff2 from
+        # @font-face — it resolves the font name via fontconfig and falls
+        # back to a system monospace if JetBrains Mono is not installed.
+        # The fallback's bold (header row) vs regular (body rows) glyph
+        # metrics differ, so column dividers drift apart across the wide
+        # PR-wrangler table. Installing JetBrains Mono and refreshing the
+        # font cache makes rsvg-convert match the font freeze declared,
+        # restoring alignment.
         run: |
           sudo apt-get update
-          sudo apt-get install -y librsvg2-bin
+          sudo apt-get install -y librsvg2-bin fonts-jetbrains-mono
+          fc-cache -f
           go install github.com/charmbracelet/freeze@v0.2.2
 
       - name: Render preview to PNG and SVG
@@ -230,6 +246,70 @@ jobs:
             preview.svg
             demo.gif
 
+      # Push the rendered images to a dedicated orphan branch so the PR
+      # comment below can embed them via raw.githubusercontent.com. There
+      # is no public GitHub API for uploading image attachments to a
+      # comment body; this branch-hosting workaround is the cleanest path
+      # for a public repo. Skipped on fork PRs (GITHUB_TOKEN is read-only
+      # there); fork PRs fall back to the artifact link in the comment.
+      - name: Publish preview images to ci-preview-artifacts branch
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        id: publish-preview
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TARGET_DIR="pr-${PR_NUMBER}/${RUN_ID}"
+          WORK="$(mktemp -d)"
+          REMOTE_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          if git clone --quiet --depth=1 --branch ci-preview-artifacts \
+              "$REMOTE_URL" "$WORK" 2>/dev/null; then
+            echo "Cloned existing ci-preview-artifacts branch."
+          else
+            echo "ci-preview-artifacts branch not found; bootstrapping."
+            rm -rf "$WORK"
+            mkdir -p "$WORK"
+            git -C "$WORK" init -q -b ci-preview-artifacts
+            git -C "$WORK" remote add origin "$REMOTE_URL"
+          fi
+
+          mkdir -p "$WORK/$TARGET_DIR"
+          cp preview.png preview.svg demo.gif "$WORK/$TARGET_DIR/"
+
+          git -C "$WORK" config user.name  "github-actions[bot]"
+          git -C "$WORK" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$WORK" add "$TARGET_DIR"
+          git -C "$WORK" commit -q -m "preview: PR #${PR_NUMBER} run ${RUN_ID} (${SHA:0:7})"
+
+          # Two concurrent PR runs can race on this branch. Each run writes
+          # to a unique pr-<N>/<run_id>/ path so there's never a file
+          # conflict, only a non-fast-forward on the branch tip — retry
+          # with a rebase pull and re-push a few times before giving up.
+          for attempt in 1 2 3 4 5; do
+            if git -C "$WORK" push -q origin ci-preview-artifacts; then
+              break
+            fi
+            echo "Push attempt ${attempt} failed; rebasing on remote tip and retrying."
+            git -C "$WORK" pull --rebase --quiet origin ci-preview-artifacts || true
+            if [ "$attempt" = "5" ]; then
+              echo "Giving up after 5 attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
+
+          BASE="https://raw.githubusercontent.com/${REPO}/ci-preview-artifacts/${TARGET_DIR}"
+          {
+            echo "png_url=${BASE}/preview.png"
+            echo "svg_url=${BASE}/preview.svg"
+            echo "gif_url=${BASE}/demo.gif"
+          } >> "$GITHUB_OUTPUT"
+
       # Skip on forks: GitHub downgrades GITHUB_TOKEN to read-only for
       # pull_request runs from a forked head repo, so issues:write is
       # ignored and createComment/updateComment 403s. The artifacts above
@@ -240,11 +320,17 @@ jobs:
         uses: actions/github-script@v9
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PNG_URL: ${{ steps.publish-preview.outputs.png_url }}
+          SVG_URL: ${{ steps.publish-preview.outputs.svg_url }}
+          GIF_URL: ${{ steps.publish-preview.outputs.gif_url }}
         with:
           script: |
             const fs = require('fs');
             const marker = '<!-- pr-wrangler:ui-preview -->';
             const runUrl = process.env.RUN_URL;
+            const pngUrl = process.env.PNG_URL;
+            const svgUrl = process.env.SVG_URL;
+            const gifUrl = process.env.GIF_URL;
 
             // GitHub's `ansi` fenced code block renders SGR colour
             // sequences but does NOT understand OSC 8 hyperlinks
@@ -260,17 +346,57 @@ jobs:
               .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');   // CSI (SGR etc.)
             const preview = stripAnsi(fs.readFileSync('preview.txt', 'utf8'));
 
-            const body = [
+            // The PNG/GIF URLs come from the publish-preview step which
+            // shares the same fork-PR gate as this step, so both either
+            // run or are skipped together. Fall back to the artifact
+            // link if the publish step didn't expose URLs for any
+            // reason (e.g. it was edited but this step wasn't).
+            const hasInlineImages = Boolean(pngUrl && gifUrl);
+
+            const lines = [
               marker,
               '## 🖥️ UI Preview',
               '',
               `_Auto-generated render of \`pr-wrangler demo --render\` for this PR._`,
-              `_The full-colour PNG, SVG, and animated GIF are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
+              '',
+            ];
+
+            if (hasInlineImages) {
+              lines.push(
+                `![preview](${pngUrl})`,
+                '',
+                '<details><summary>Animated walkthrough</summary>',
+                '',
+                `![demo](${gifUrl})`,
+                '',
+                '</details>',
+                '',
+              );
+            } else {
+              lines.push(
+                `_The full-colour PNG, SVG, and animated GIF are attached to the [workflow run](${runUrl}) as the \`ui-preview\` artifact._`,
+                '',
+              );
+            }
+
+            lines.push(
+              '<details><summary>ANSI snapshot</summary>',
               '',
               '```',
               preview,
               '```',
-            ].join('\n');
+              '',
+              '</details>',
+            );
+
+            if (hasInlineImages) {
+              lines.push(
+                '',
+                `_Raw assets: [PNG](${pngUrl}) · [SVG](${svgUrl}) · [GIF](${gifUrl}) · [workflow run](${runUrl})_`,
+              );
+            }
+
+            const body = lines.join('\n');
 
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;

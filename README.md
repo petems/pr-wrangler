@@ -173,11 +173,18 @@ The CI pipeline includes a `UI Preview` job that runs on every pull request. It:
 3. Pipes that snapshot through `freeze` to produce `preview.png` and `preview.svg`.
 4. Renders `demo.tape` through [`charmbracelet/vhs-action`](https://github.com/charmbracelet/vhs-action) to produce `demo.gif`.
 5. Uploads `preview.txt`, `preview.png`, `preview.svg`, and `demo.gif` as the `ui-preview` workflow artifact.
-6. Posts (or updates) a comment on the PR with the ANSI snapshot wrapped in an `ansi` fenced code block, plus a link to the workflow run where the image/animation artifacts live.
+6. Pushes `preview.png`, `preview.svg`, and `demo.gif` to a dedicated orphan branch (`ci-preview-artifacts`) under the path `pr-<number>/<run_id>/`, so the assets get stable `raw.githubusercontent.com` URLs that GitHub renders inline in comments.
+7. Posts (or updates) a comment on the PR that embeds `preview.png` inline, hides the animated GIF and the ANSI snapshot inside collapsible `<details>` sections, and links the raw assets.
 
 The comment is keyed by a hidden marker (`<!-- pr-wrangler:ui-preview -->`), so subsequent pushes update the existing comment instead of creating duplicates.
 
-**Forked PRs**: GitHub downgrades `GITHUB_TOKEN` to read-only on `pull_request` runs from a forked head repo, so the comment step is gated with `if: github.event.pull_request.head.repo.full_name == github.repository`. Artifacts are still uploaded for fork PRs — reviewers can fetch them from the workflow run page even when the auto-comment is skipped.
+### Why a separate branch for images?
+
+GitHub does not expose a public REST or GraphQL endpoint for uploading image attachments to a comment body — the Web UI drag-and-drop flow uses a private, cookie-authenticated upload pipeline that rejects `GITHUB_TOKEN` auth. The only ways to embed an image inline from CI are: push the image into the repo and reference it via `raw.githubusercontent.com`, host it on a third party (Imgur, S3), or use one of the unofficial CLIs that reverse-engineer the Web UI upload to land assets at `github.com/user-attachments/`. Because `pr-wrangler` is a public repo, the first option works natively and avoids any external dependency.
+
+The `ci-preview-artifacts` branch is **auto-maintained by CI** and detached from `master` history (orphan branch). It should be excluded from stale-branch cleanup so the inline-image links in historical PR comments keep working; CI will recreate the branch from scratch if it's ever deleted, but any PR comment referencing a removed `pr-<N>/<run_id>/` path will lose its image.
+
+**Forked PRs**: GitHub downgrades `GITHUB_TOKEN` to read-only on `pull_request` runs from a forked head repo, so the push-to-branch and comment steps are both gated with `if: github.event.pull_request.head.repo.full_name == github.repository`. Artifacts are still uploaded for fork PRs — reviewers can fetch them from the workflow run page even when the auto-comment is skipped.
 
 ## Repository Layout
 
