@@ -213,7 +213,7 @@ Flags:
 			return
 		case strings.HasPrefix(a, "--count="):
 			n, err := strconv.Atoi(strings.TrimPrefix(a, "--count="))
-			if err != nil {
+			if err != nil || n < 0 {
 				fmt.Fprintf(os.Stderr, "Invalid --count value: %s\n", a)
 				os.Exit(1)
 			}
@@ -225,14 +225,14 @@ Flags:
 			}
 			i++
 			n, err := strconv.Atoi(args[i])
-			if err != nil {
+			if err != nil || n < 0 {
 				fmt.Fprintf(os.Stderr, "Invalid --count value: %s\n", args[i])
 				os.Exit(1)
 			}
 			count = n
 		case strings.HasPrefix(a, "-n="):
 			n, err := strconv.Atoi(strings.TrimPrefix(a, "-n="))
-			if err != nil {
+			if err != nil || n < 0 {
 				fmt.Fprintf(os.Stderr, "Invalid -n value: %s\n", a)
 				os.Exit(1)
 			}
@@ -244,7 +244,7 @@ Flags:
 			}
 			i++
 			n, err := strconv.Atoi(args[i])
-			if err != nil {
+			if err != nil || n < 0 {
 				fmt.Fprintf(os.Stderr, "Invalid -n value: %s\n", args[i])
 				os.Exit(1)
 			}
