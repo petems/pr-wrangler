@@ -173,7 +173,7 @@ func (m *SessionManager) ListTmuxSessions(ctx context.Context) ([]string, error)
 	}
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" {
-		return []string{}, nil
+		return nil, nil
 	}
 	return strings.Split(trimmed, "\n"), nil
 }
