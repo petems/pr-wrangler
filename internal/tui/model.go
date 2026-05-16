@@ -272,6 +272,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.activeViewIndex = m.viewPickerIndex
+				if m.demoMode {
+					m.notification = fmt.Sprintf("demo mode: switched to view %q (no fetch)", m.config.Views[m.activeViewIndex].Name)
+					return m, nil
+				}
 				return m, m.switchToActiveView()
 			case "esc":
 				m.showViewPicker = false

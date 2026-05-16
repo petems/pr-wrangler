@@ -1084,6 +1084,31 @@ func TestViewPicker_EscCancels(t *testing.T) {
 	}
 }
 
+func TestViewPicker_DemoModeAppliesViewWithoutFetch(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig(), 5)
+	if len(m.config.Views) < 2 {
+		t.Fatalf("demo model should seed multiple views, got %d", len(m.config.Views))
+	}
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.activeViewIndex != 1 {
+		t.Errorf("activeViewIndex: got %d, want 1", next.activeViewIndex)
+	}
+	if cmd != nil {
+		t.Error("demo mode should not return a fetch cmd from the view picker")
+	}
+	if next.notification == "" {
+		t.Error("expected a demo-mode notification after applying view")
+	}
+}
+
 func TestConfiguredQuery_UsesActiveViewIndex(t *testing.T) {
 	m := newMultiViewModel(t, 3)
 
