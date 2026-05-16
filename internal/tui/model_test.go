@@ -148,6 +148,25 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 	}
 }
 
+func TestThemePicker_OverlayCentredAfterWindowSize(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	m = sendKey(t, m, themePickerKeyPress())
+
+	out := m.View().Content
+	if !strings.Contains(out, "Select Theme") {
+		t.Fatal("rendered view should include picker title when picker is open")
+	}
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╮") {
+		t.Fatal("rendered view should include rounded border characters for the modal frame")
+	}
+}
+
 func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	originalScheme := m.config.ColorScheme

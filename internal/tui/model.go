@@ -432,7 +432,40 @@ func (m Model) renderThemePicker() string {
 	}
 	lines = append(lines, "")
 	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 2).
+		Render(body)
+}
+
+// composeThemePicker overlays the theme picker as a centred modal on top of
+// the dashboard. When the picker is closed it returns the dashboard
+// unchanged. When the window size hasn't been received yet
+// (width or height == 0) it falls back to appending the picker after the
+// dashboard, which keeps tests that don't send a WindowSizeMsg stable.
+func (m Model) composeThemePicker(dashboard string) string {
+	if !m.showThemePicker {
+		return dashboard
+	}
+	picker := m.renderThemePicker()
+	if m.width == 0 || m.height == 0 {
+		return dashboard + "\n\n" + picker
+	}
+	pw := lipgloss.Width(picker)
+	ph := lipgloss.Height(picker)
+	x := (m.width - pw) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (m.height - ph) / 2
+	if y < 0 {
+		y = 0
+	}
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(dashboard),
+		lipgloss.NewLayer(picker).X(x).Y(y).Z(1),
+	).Render()
 }
 
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
@@ -447,7 +480,7 @@ const cowsayDashboard = "" +
 	"                ||     ||"
 
 func (m Model) View() tea.View {
-	v := tea.NewView(m.viewContent())
+	v := tea.NewView(m.composeThemePicker(m.viewContent()))
 	v.AltScreen = true
 	return v
 }
@@ -494,11 +527,6 @@ func (m Model) viewContent() string {
 	if m.showHelp {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderHelp())
-	}
-
-	if m.showThemePicker {
-		b.WriteString("\n\n")
-		b.WriteString(m.renderThemePicker())
 	}
 
 	return b.String()
