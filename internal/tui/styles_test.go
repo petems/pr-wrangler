@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestThemeNamesMatchColorSchemes(t *testing.T) {
 	if len(ThemeNames) != len(colorSchemes) {
@@ -22,6 +25,19 @@ func TestThemeNamesMatchColorSchemes(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("colorSchemes has %q but ThemeNames does not include it", name)
+		}
+	}
+}
+
+func TestColorSchemesPopulateEveryToken(t *testing.T) {
+	schemeType := reflect.TypeOf(ColorScheme{})
+	for name, scheme := range colorSchemes {
+		value := reflect.ValueOf(scheme)
+		for i := 0; i < schemeType.NumField(); i++ {
+			field := schemeType.Field(i)
+			if value.Field(i).IsNil() {
+				t.Errorf("color scheme %q leaves %s unset", name, field.Name)
+			}
 		}
 	}
 }

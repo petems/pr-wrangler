@@ -1107,26 +1107,24 @@ func (m Model) renderTable() string {
 	}
 
 	headers := []string{" ", "Repo", "PR", "Title", "Status", "Action"}
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(m.styles.TableText)
-	baseStyle := lipgloss.NewStyle().Foreground(m.styles.TableText)
 	indicatorStyle := m.styles.Indicator
 	selectedStyle := m.styles.SelectedRow
 
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
-		BorderStyle(m.styles.Help).
+		BorderStyle(m.styles.Border).
 		Headers(headers...).
 		Rows(rows...).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			pad := cellPad(col)
 			s := lipgloss.NewStyle().Width(widths[col]).Padding(0, pad)
 			if row == table.HeaderRow {
-				return s.Inherit(headerStyle)
+				return s.Inherit(m.columnHeaderStyle(col))
 			}
 			// row is the visible-row index (0 = first body row)
 			rowIdx := start + row
 			isSelected := rowIdx == m.selected
-			cell := s.Inherit(baseStyle)
+			cell := s.Inherit(m.columnBodyStyle(m.rows[rowIdx], col))
 			if col == 0 {
 				cell = s.Inherit(indicatorStyle)
 			}
@@ -1148,6 +1146,76 @@ func (m Model) renderTable() string {
 		out += "\n" + m.styles.Help.Render(fmt.Sprintf("page %d/%d  (%d rows)", page, totalPages, len(m.rows)))
 	}
 	return out
+}
+
+func (m Model) columnHeaderStyle(col int) lipgloss.Style {
+	switch col {
+	case 1:
+		return m.styles.Repo.Bold(true)
+	case 2:
+		return m.styles.Number.Bold(true)
+	case 3:
+		return m.styles.TitleText.Bold(true)
+	case 4:
+		return m.styles.Header
+	case 5:
+		return m.styles.HelpCategory
+	default:
+		return m.styles.Header
+	}
+}
+
+func (m Model) columnBodyStyle(r PRRow, col int) lipgloss.Style {
+	switch col {
+	case 1:
+		return m.styles.Repo
+	case 2:
+		return m.styles.Number
+	case 3:
+		return m.styles.TitleText
+	case 4:
+		return m.statusStyle(r.Status)
+	case 5:
+		return m.actionStyle(r.Action)
+	default:
+		return lipgloss.NewStyle()
+	}
+}
+
+func (m Model) statusStyle(status github.PRStatus) lipgloss.Style {
+	switch status {
+	case github.PRStatusApproved, github.PRStatusMerged:
+		return m.styles.Success
+	case github.PRStatusCIFailing, github.PRStatusDraftCIFailing:
+		return m.styles.Error.Bold(true)
+	case github.PRStatusChangesRequested, github.PRStatusReviewedWithComments:
+		return m.styles.Review
+	case github.PRStatusHasConflicts:
+		return m.styles.Conflict
+	case github.PRStatusWaitingForReviews, github.PRStatusOpen, github.PRStatusSAMLRequired:
+		return m.styles.Info
+	case github.PRStatusDraft:
+		return m.styles.Draft
+	default:
+		return lipgloss.NewStyle().Foreground(m.styles.TableText)
+	}
+}
+
+func (m Model) actionStyle(action github.Action) lipgloss.Style {
+	switch action {
+	case github.ActionMerge:
+		return m.styles.Success
+	case github.ActionFixCI:
+		return m.styles.Error.Bold(true)
+	case github.ActionAddressFeedback, github.ActionReviewComments:
+		return m.styles.Review
+	case github.ActionResolveConflicts:
+		return m.styles.Conflict
+	case github.ActionInvestigate, github.ActionAuthorizeSAML:
+		return m.styles.Info.Bold(true)
+	default:
+		return m.styles.Help
+	}
 }
 
 // truncateAnsi returns s shortened to at most width display columns. It uses
