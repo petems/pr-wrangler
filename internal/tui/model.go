@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -27,6 +29,50 @@ const (
 	RowTypePR    RowType = "pr"
 	RowTypeLocal RowType = "local"
 )
+
+type SortMode string
+
+const (
+	SortPriority SortMode = "priority"
+	SortGitHub   SortMode = "github"
+	SortRepo     SortMode = "repo"
+	SortPR       SortMode = "pr"
+	SortTitle    SortMode = "title"
+	SortDateDesc SortMode = "date_desc"
+	SortDateAsc  SortMode = "date_asc"
+)
+
+var sortModes = []SortMode{SortPriority, SortGitHub, SortRepo, SortPR, SortTitle, SortDateDesc, SortDateAsc}
+
+func (m SortMode) Label() string {
+	switch m {
+	case SortPriority:
+		return "priority"
+	case SortGitHub:
+		return "GitHub order"
+	case SortRepo:
+		return "repo"
+	case SortPR:
+		return "PR number"
+	case SortTitle:
+		return "title"
+	case SortDateDesc:
+		return "Date (Newest)"
+	case SortDateAsc:
+		return "Date (Oldest)"
+	default:
+		return string(m)
+	}
+}
+
+func nextSortMode(mode SortMode) SortMode {
+	for i, candidate := range sortModes {
+		if candidate == mode {
+			return sortModes[(i+1)%len(sortModes)]
+		}
+	}
+	return SortPriority
+}
 
 type PRRow struct {
 	PR           github.PR
@@ -72,6 +118,10 @@ type Model struct {
 	showHelp         bool
 	showThemePicker  bool
 	themePickerIndex int
+	searchActive     bool
+	searchQuery      string
+	searchDraft      string
+	sortMode         SortMode
 
 	// View picker overlay state (mirrors theme picker).
 	activeViewIndex int
@@ -131,6 +181,7 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 		prSessions:      make(map[int]tmux.PRSession),
 		browserOpener:   defaultOpenBrowser,
 		activeViewIndex: defaultViewIndex(cfg.Views),
+		sortMode:        SortPriority,
 	}
 
 	if !opts.DisableCache && prCache != nil {
@@ -171,20 +222,23 @@ func NewDemoModel(cfg config.Config, count int) Model {
 		}
 	}
 
-	return Model{
-		config:        cfg,
-		styles:        styles,
-		loading:       false,
-		spinner:       s,
-		width:         140,
-		height:        40,
-		allRows:       rows,
-		rows:          rows,
-		samlErrors:    samlErrors,
-		prSessions:    MockPRSessions(),
-		demoMode:      true,
-		browserOpener: noopBrowserOpener,
+	m := Model{
+		config:          cfg,
+		styles:          styles,
+		loading:         false,
+		spinner:         s,
+		width:           140,
+		height:          40,
+		allRows:         rows,
+		samlErrors:      samlErrors,
+		prSessions:      MockPRSessions(),
+		demoMode:        true,
+		browserOpener:   noopBrowserOpener,
+		activeViewIndex: defaultViewIndex(cfg.Views),
+		sortMode:        SortPriority,
 	}
+	m.applyFilters()
+	return m
 }
 
 func buildDemoRows(count int) ([]PRRow, []github.SAMLErrorEntry) {
@@ -244,6 +298,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		if m.searchActive {
+			switch msg.String() {
+			case "enter":
+				m.searchQuery = strings.TrimSpace(m.searchDraft)
+				m.searchActive = false
+				m.applyFilters()
+				if m.searchQuery == "" {
+					m.notification = "search cleared"
+				} else {
+					m.notification = fmt.Sprintf("search: %q (%d rows)", m.searchQuery, len(m.rows))
+				}
+			case "esc":
+				m.searchDraft = m.searchQuery
+				m.searchActive = false
+			case "backspace", "ctrl+h":
+				if m.searchDraft != "" {
+					_, size := lastRune(m.searchDraft)
+					m.searchDraft = m.searchDraft[:len(m.searchDraft)-size]
+				}
+			case "ctrl+u":
+				m.searchDraft = ""
+			default:
+				if text := msg.Key().Text; text != "" {
+					m.searchDraft += text
+				}
+			}
+			return m, nil
+		}
+
 		// While help is open, intercept all keys so the table (and other
 		// shortcuts) don't see them.
 		if m.showHelp {
@@ -351,6 +434,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, m.openSAMLAuthURL()
+		case "/":
+			m.searchActive = true
+			m.searchDraft = m.searchQuery
+			return m, nil
+		case "s":
+			m.sortMode = nextSortMode(m.sortMode)
+			m.applyFilters()
+			m.notification = fmt.Sprintf("sort: %s", m.sortMode.Label())
 		case "up", "k":
 			if m.selected > 0 {
 				m.selected--
@@ -652,12 +743,19 @@ func (m Model) viewContent() string {
 	var b strings.Builder
 	b.WriteString(cowsayDashboard + "\n\n")
 	b.WriteString(m.styles.Title.Render("PR Wrangler"))
+	meta := []string{fmt.Sprintf("sort: %s", m.sortMode.Label())}
 	if len(m.config.Views) > 1 && m.activeViewIndex >= 0 && m.activeViewIndex < len(m.config.Views) {
 		name := m.config.Views[m.activeViewIndex].Name
-		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [view: %s (%d/%d)]", name, m.activeViewIndex+1, len(m.config.Views))))
+		meta = append(meta, fmt.Sprintf("view: %s (%d/%d)", name, m.activeViewIndex+1, len(m.config.Views)))
 	}
 	if q := m.configuredQuery(); q != "" {
-		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [query: %s]", q)))
+		meta = append(meta, fmt.Sprintf("query: %s", q))
+	}
+	if m.searchQuery != "" {
+		meta = append(meta, fmt.Sprintf("search: %s", m.searchQuery))
+	}
+	if len(meta) > 0 {
+		b.WriteString(m.styles.Help.Render("  [" + strings.Join(meta, " | ") + "]"))
 	}
 	if m.refreshing && !m.loading {
 		b.WriteString(m.styles.Loading.Render("  Refreshing..."))
@@ -685,7 +783,11 @@ func (m Model) viewContent() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(m.buildHelpLine())
+	if m.searchActive {
+		b.WriteString(m.renderSearchPrompt())
+	} else {
+		b.WriteString(m.buildHelpLine())
+	}
 
 	// Overlays (help, theme picker, view picker, future modals) are
 	// composed by View() via composeModal so they always sit centred on top
@@ -981,16 +1083,162 @@ func (m *Model) discoverSessionsCmd() tea.Cmd {
 }
 
 func (m *Model) applyFilters() {
-	m.rows = m.allRows
-	// TODO: implement filtering
+	selected := ""
+	if m.selected >= 0 && m.selected < len(m.rows) {
+		selected = rowKey(m.rows[m.selected])
+	}
+
+	rows := make([]PRRow, 0, len(m.allRows))
+	for _, row := range m.allRows {
+		if rowMatchesSearch(row, m.searchQuery) {
+			rows = append(rows, row)
+		}
+	}
+
+	sortRows(rows, m.sortMode)
+	m.rows = rows
+
+	if selected != "" {
+		for i, row := range m.rows {
+			if rowKey(row) == selected {
+				m.selected = i
+				return
+			}
+		}
+	}
+	if len(m.rows) == 0 || m.selected < 0 {
+		m.selected = 0
+	} else if m.selected >= len(m.rows) {
+		m.selected = len(m.rows) - 1
+	}
+}
+
+func sortRows(rows []PRRow, mode SortMode) {
+	switch mode {
+	case SortRepo:
+		sort.SliceStable(rows, func(i, j int) bool {
+			left := strings.ToLower(rows[i].PR.RepoNameWithOwner)
+			right := strings.ToLower(rows[j].PR.RepoNameWithOwner)
+			if left == right {
+				return rows[i].PR.Number < rows[j].PR.Number
+			}
+			return left < right
+		})
+	case SortPR:
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].PR.Number < rows[j].PR.Number
+		})
+	case SortTitle:
+		sort.SliceStable(rows, func(i, j int) bool {
+			return strings.ToLower(rows[i].PR.Title) < strings.ToLower(rows[j].PR.Title)
+		})
+	case SortDateDesc:
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rowSortTime(rows[i]).After(rowSortTime(rows[j]))
+		})
+	case SortDateAsc:
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rowSortTime(rows[i]).Before(rowSortTime(rows[j]))
+		})
+	case SortGitHub:
+		return
+	default:
+		sort.SliceStable(rows, func(i, j int) bool {
+			left := rowPriority(rows[i])
+			right := rowPriority(rows[j])
+			if left == right {
+				return false
+			}
+			return left < right
+		})
+	}
+}
+
+func rowSortTime(row PRRow) time.Time {
+	if !row.PR.UpdatedAt.IsZero() {
+		return row.PR.UpdatedAt
+	}
+	return row.PR.CreatedAt
+}
+
+func formatTableTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.Local().Format("Jan 02 15:04")
+}
+
+func rowPriority(row PRRow) int {
+	switch row.Action {
+	case github.ActionFixCI:
+		return 10
+	case github.ActionResolveConflicts:
+		return 20
+	case github.ActionAddressFeedback, github.ActionReviewComments:
+		return 30
+	case github.ActionMerge:
+		return 40
+	case github.ActionAuthorizeSAML:
+		return 50
+	}
+
+	switch row.Status {
+	case github.PRStatusCIFailing, github.PRStatusDraftCIFailing:
+		return 10
+	case github.PRStatusHasConflicts:
+		return 20
+	case github.PRStatusChangesRequested, github.PRStatusReviewedWithComments:
+		return 30
+	case github.PRStatusApproved:
+		return 40
+	case github.PRStatusSAMLRequired:
+		return 50
+	case github.PRStatusWaitingForReviews, github.PRStatusOpen:
+		return 60
+	case github.PRStatusDraft:
+		return 70
+	default:
+		return 80
+	}
+}
+
+func rowMatchesSearch(row PRRow, query string) bool {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return true
+	}
+	return strings.Contains(rowSearchText(row), query)
+}
+
+func rowSearchText(row PRRow) string {
+	parts := []string{
+		row.PR.RepoNameWithOwner,
+		extractRepoName(row.PR.RepoNameWithOwner),
+		fmt.Sprintf("#%d", row.PR.Number),
+		fmt.Sprintf("%d", row.PR.Number),
+		row.PR.Title,
+		row.PR.Author,
+		row.PR.HeadRefName,
+		formatTableTime(row.PR.CreatedAt),
+		formatTableTime(row.PR.UpdatedAt),
+		row.Status.String(),
+		row.Action.String(),
+		row.TmuxSession,
+		row.AgentStatus,
+	}
+	return strings.ToLower(strings.Join(parts, " "))
+}
+
+func rowKey(row PRRow) string {
+	return fmt.Sprintf("%s/%d/%s", row.PR.RepoNameWithOwner, row.PR.Number, row.RowType)
 }
 
 // Layout constants for the table view.
 const (
 	// nonTitleColumnsWidth reserves columns/padding around the Title column:
-	// indicator (2) + repo (20) + pr (8) + status (20) + action (20) plus
-	// per-column borders and padding.
-	nonTitleColumnsWidth = 82
+	// indicator (2) + repo (20) + pr (8) + created (14) + updated (14) +
+	// status (20) + action (20) plus per-column borders and padding.
+	nonTitleColumnsWidth = 110
 	minTitleColumnWidth  = 10
 	// tableChromeLines reserves rows of the terminal for non-table chrome
 	// in View() so the cowsay header stays visible:
@@ -1034,7 +1282,7 @@ func (m Model) tablePageSize() int {
 
 // columnWidths returns the per-column widths in column order.
 func (m Model) columnWidths() []int {
-	return []int{2, 20, 8, m.titleColumnWidth(), 20, 20}
+	return []int{2, 20, 8, m.titleColumnWidth(), 14, 14, 20, 20}
 }
 
 // pageBounds returns the [start, end) row indices for the visible page,
@@ -1092,21 +1340,27 @@ func (m Model) renderTable() string {
 		repoCell := truncateAnsi(extractRepoName(r.PR.RepoNameWithOwner), cellContentWidth(1))
 		prCell := truncateAnsi(fmt.Sprintf("#%d", r.PR.Number), cellContentWidth(2))
 		titleCell := truncateAnsi(r.PR.Title, cellContentWidth(3))
-		statusCell := truncateAnsi(r.Status.String(), cellContentWidth(4))
-		actionCell := truncateAnsi(r.Action.String(), cellContentWidth(5))
+		createdCell := truncateAnsi(formatTableTime(r.PR.CreatedAt), cellContentWidth(4))
+		updatedCell := truncateAnsi(formatTableTime(r.PR.UpdatedAt), cellContentWidth(5))
+		statusCell := truncateAnsi(r.Status.String(), cellContentWidth(6))
+		actionCell := truncateAnsi(r.Action.String(), cellContentWidth(7))
 
-		rows = append(rows, []string{indicator, repoCell, prCell, titleCell, statusCell, actionCell})
+		rows = append(rows, []string{indicator, repoCell, prCell, titleCell, createdCell, updatedCell, statusCell, actionCell})
 
 		// Per-cell URLs. Empty string = no hyperlink for that cell.
+		repoURL := ""
+		if owner := r.PR.RepoNameWithOwner; owner != "" {
+			repoURL = "https://github.com/" + owner
+		}
 		prURL := r.PR.URL
 		statusURL := ""
 		if r.PR.URL != "" {
 			statusURL = r.PR.URL + "/checks"
 		}
-		urls = append(urls, []string{"", "", prURL, "", statusURL, ""})
+		urls = append(urls, []string{"", repoURL, prURL, prURL, "", "", statusURL, ""})
 	}
 
-	headers := []string{" ", "Repo", "PR", "Title", "Status", "Action"}
+	headers := []string{" ", "Repo", "PR", "Title", "Created At", "Updated At", "Status", "Action"}
 	indicatorStyle := m.styles.Indicator
 	selectedStyle := m.styles.SelectedRow
 
@@ -1156,9 +1410,11 @@ func (m Model) columnHeaderStyle(col int) lipgloss.Style {
 		return m.styles.Number.Bold(true)
 	case 3:
 		return m.styles.TitleText.Bold(true)
-	case 4:
+	case 4, 5:
 		return m.styles.Header
-	case 5:
+	case 6:
+		return m.styles.Header
+	case 7:
 		return m.styles.HelpCategory
 	default:
 		return m.styles.Header
@@ -1173,9 +1429,11 @@ func (m Model) columnBodyStyle(r PRRow, col int) lipgloss.Style {
 		return m.styles.Number
 	case 3:
 		return m.styles.TitleText
-	case 4:
+	case 4, 5:
+		return m.styles.Help
+	case 6:
 		return m.statusStyle(r.Status)
-	case 5:
+	case 7:
 		return m.actionStyle(r.Action)
 	default:
 		return lipgloss.NewStyle()
@@ -1232,6 +1490,13 @@ func truncateAnsi(s string, width int) string {
 		return ansi.Truncate(s, width, "")
 	}
 	return ansi.Truncate(s, width, "…")
+}
+
+func lastRune(s string) (rune, int) {
+	if s == "" {
+		return 0, 0
+	}
+	return utf8.DecodeLastRuneInString(s)
 }
 
 func (m *Model) openSelectedPR() tea.Cmd {
@@ -1321,6 +1586,8 @@ var helpEntries = []helpEntry{
 	{"enter/c", "enter / c", "claude session", "open or switch to Claude session"},
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
+	{"/", "/", "search", "search visible rows"},
+	{"s", "s", "sort", "cycle sort order"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
 	{"v", "v", "switch view", "open the view picker to switch between configured views"},
 	{"t", "t", "theme", "Change colour scheme"},
@@ -1359,6 +1626,11 @@ func (m Model) renderHelp(maxWidth int) string {
 	lines = append(lines, m.styles.Help.Render(helpModalDismiss))
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return frameModal(body, maxWidth)
+}
+
+func (m Model) renderSearchPrompt() string {
+	prompt := "/" + m.searchDraft
+	return m.styles.HelpCategory.Render(prompt) + m.styles.Help.Render("  enter: apply | esc: cancel | ctrl+u: clear")
 }
 
 func extractRepoName(nameWithOwner string) string {
@@ -1505,6 +1777,8 @@ func samlPlaceholderRow(entry github.SAMLErrorEntry) PRRow {
 			Title:             "SAML Authorization Required",
 			RepoNameWithOwner: entry.RepoNameWithOwner,
 			State:             github.PRStateOpen,
+			CreatedAt:         entry.CreatedAt,
+			UpdatedAt:         entry.UpdatedAt,
 		},
 		Status:    github.PRStatusSAMLRequired,
 		Action:    action,

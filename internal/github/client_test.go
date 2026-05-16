@@ -1,9 +1,12 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -185,6 +188,51 @@ func TestParsePRViewOutput_InvalidJSON(t *testing.T) {
 	_, err := ParsePRViewOutput([]byte("not json"))
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestFetchPRDetailMapsCreatedAndUpdatedAt(t *testing.T) {
+	createdAt := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 16, 11, 45, 0, 0, time.UTC)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/org/repo/pulls/42":
+			_, _ = fmt.Fprintf(w, `{
+				"number": 42,
+				"title": "Keep date sorting honest",
+				"html_url": "https://github.com/org/repo/pull/42",
+				"user": {"login": "alice"},
+				"head": {"ref": "fix/date-sort", "sha": ""},
+				"state": "open",
+				"draft": false,
+				"created_at": %q,
+				"updated_at": %q
+			}`, createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339))
+		case "/repos/org/repo/pulls/42/reviews":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL + "/")
+	if err != nil {
+		t.Fatalf("parsing base URL: %v", err)
+	}
+	client := gh.NewClient(server.Client())
+	client.BaseURL = baseURL
+
+	pr, err := (&GHClient{client: client}).fetchPRDetail(context.Background(), "org", "repo", 42)
+	if err != nil {
+		t.Fatalf("fetchPRDetail returned error: %v", err)
+	}
+	if !pr.CreatedAt.Equal(createdAt) {
+		t.Fatalf("CreatedAt = %s, want %s", pr.CreatedAt, createdAt)
+	}
+	if !pr.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("UpdatedAt = %s, want %s", pr.UpdatedAt, updatedAt)
 	}
 }
 
