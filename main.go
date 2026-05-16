@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,21 +191,67 @@ func printCacheStatus(path string) error {
 
 func runDemo(args []string) {
 	render := false
-	for _, a := range args {
-		switch a {
-		case "--render", "-r":
+	count := 10
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--render" || a == "-r":
 			render = true
-		case "--help", "-h":
+		case a == "--help" || a == "-h":
 			fmt.Println(`pr-wrangler demo — preview the TUI with mock data
 
 Usage:
-  pr-wrangler demo            Launch the interactive TUI populated with mock data
-  pr-wrangler demo --render   Render a single TUI frame (with ANSI colour) to stdout
-  pr-wrangler demo -r         Alias for --render`)
+  pr-wrangler demo                 Launch the interactive TUI populated with mock data
+  pr-wrangler demo --render        Render a single TUI frame (with ANSI colour) to stdout
+  pr-wrangler demo --count N       Render with N mock PRs (default: 10)
+  pr-wrangler demo -n N            Alias for --count
+
+Flags:
+  --render, -r                     Render a single frame to stdout (non-interactive)
+  --count, -n N                    Number of mock PRs to generate (default: 10)
+  --help, -h                       Show this help text`)
 			return
+		case strings.HasPrefix(a, "--count="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--count="))
+			if err != nil || n < 0 {
+				fmt.Fprintf(os.Stderr, "Invalid --count value: %s\n", a)
+				os.Exit(1)
+			}
+			count = n
+		case a == "--count":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Missing value for --count")
+				os.Exit(1)
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				fmt.Fprintf(os.Stderr, "Invalid --count value: %s\n", args[i])
+				os.Exit(1)
+			}
+			count = n
+		case strings.HasPrefix(a, "-n="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "-n="))
+			if err != nil || n < 0 {
+				fmt.Fprintf(os.Stderr, "Invalid -n value: %s\n", a)
+				os.Exit(1)
+			}
+			count = n
+		case a == "-n":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Missing value for -n")
+				os.Exit(1)
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				fmt.Fprintf(os.Stderr, "Invalid -n value: %s\n", args[i])
+				os.Exit(1)
+			}
+			count = n
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown demo flag: %s\n", a)
-			fmt.Fprintln(os.Stderr, "Available: --render, -r, --help, -h")
+			fmt.Fprintln(os.Stderr, "Available: --render, -r, --count, -n, --help, -h")
 			os.Exit(1)
 		}
 	}
@@ -215,7 +262,7 @@ Usage:
 		os.Exit(1)
 	}
 
-	m := tui.NewDemoModel(cfg)
+	m := tui.NewDemoModel(cfg, count)
 
 	if render {
 		fmt.Println(m.View().Content)

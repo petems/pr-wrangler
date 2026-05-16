@@ -786,7 +786,7 @@ func runCmdAndDrain(cmd tea.Cmd) {
 // deref reintroduced in that path triggers a goroutine panic the runtime
 // surfaces as a test failure.
 func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	// Defence-in-depth: even if the demo guards on 'o'/'a' regress, this
 	// stub keeps the test from shelling out to the real OS browser.
 	m.browserOpener = func(string) {}
@@ -832,12 +832,31 @@ func TestNewDemoModel_InitAndKeypressesDoNotPanic(t *testing.T) {
 	}
 }
 
+func TestNewDemoModel_CountControlsRenderedRows(t *testing.T) {
+	tests := []int{0, 1, 3, 4, 7, 8, 10, 50}
+
+	for _, count := range tests {
+		m := NewDemoModel(config.DefaultConfig(), count)
+		if len(m.rows) != count {
+			t.Fatalf("count %d: rows=%d, want %d", count, len(m.rows), count)
+		}
+		if len(m.allRows) != count {
+			t.Fatalf("count %d: allRows=%d, want %d", count, len(m.allRows), count)
+		}
+		for _, entry := range m.samlErrors {
+			if entry.Index >= count {
+				t.Fatalf("count %d: kept out-of-range SAML index %d", count, entry.Index)
+			}
+		}
+	}
+}
+
 // TestDemoModel_RefreshIsNoOp guards against accidentally re-enabling the
 // network refresh path in demo mode. Pressing 'r' must not flip loading=true
 // (which would hide the populated rows behind the cowsay loading screen) or
 // dispatch a fetch command.
 func TestDemoModel_RefreshIsNoOp(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	rowsBefore := len(m.rows)
 
 	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
@@ -863,7 +882,7 @@ func TestDemoModel_RefreshIsNoOp(t *testing.T) {
 // TestDemoModel_OpenPRIsNoOp guards against the demo TUI launching a real
 // browser to mock PR URLs (which 404 for anyone except the repo owner).
 func TestDemoModel_OpenPRIsNoOp(t *testing.T) {
-	m := NewDemoModel(config.DefaultConfig())
+	m := NewDemoModel(config.DefaultConfig(), 10)
 	called := false
 	m.browserOpener = func(string) { called = true }
 

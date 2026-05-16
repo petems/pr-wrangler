@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -186,6 +187,55 @@ func MockPRs() []github.PR {
 			UpdatedAt:         mergedAt,
 		},
 	}
+}
+
+// GenerateMockPRs returns a slice of mock PRs sized to count.
+//
+// For count <= 10 it returns the first count entries from MockPRs(). For
+// larger counts it cycles through the 10 base patterns, assigning fresh PR
+// numbers and tweaking titles/URLs so entries remain unique.
+func GenerateMockPRs(count int) []github.PR {
+	if count <= 0 {
+		return nil
+	}
+
+	base := MockPRs()
+	if count <= len(base) {
+		out := make([]github.PR, count)
+		copy(out, base[:count])
+		return out
+	}
+
+	out := make([]github.PR, 0, count)
+	out = append(out, base...)
+
+	maxNumber := 0
+	for _, pr := range base {
+		if pr.Number > maxNumber {
+			maxNumber = pr.Number
+		}
+	}
+
+	nextNumber := maxNumber + 1
+	for len(out) < count {
+		template := base[(len(out)-len(base))%len(base)]
+		template.Number = nextNumber
+		nextNumber++
+
+		if template.RepoNameWithOwner != "" {
+			template.URL = fmt.Sprintf("https://github.com/%s/pull/%d", template.RepoNameWithOwner, template.Number)
+		}
+		if template.HeadRefName != "" {
+			template.HeadRefName = fmt.Sprintf("%s-demo-%d", template.HeadRefName, template.Number)
+		}
+		if template.Title != "" {
+			template.Title = fmt.Sprintf("%s (demo #%d)", template.Title, template.Number)
+		}
+
+		out = append(out, template)
+	}
+
+	return out
 }
 
 // MockSAMLErrors returns SAML placeholder entries that exercise the
