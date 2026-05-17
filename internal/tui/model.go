@@ -830,14 +830,21 @@ func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
 	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache)
 }
 
-// switchToActiveView clears table state and kicks off a fetch for the
-// active view's query. Used after the view picker commits a change.
+// switchToActiveView resets table state for the new view and kicks off a
+// fetch for its query. Used after the view picker commits a change.
 //
 // Invalidating m.progressCh is load-bearing: configuredQuery() now points at
 // the newly-selected view, so a late prsLoadedMsg from the previous fetch
 // would otherwise pass the staleness check (msg.progressCh == m.progressCh)
 // and get cached under the wrong query. Setting m.progressCh to nil makes
 // any in-flight messages from the old channel fail the check and drain.
+//
+// When the on-disk cache has an entry for the new view's query we hydrate
+// from it immediately (loading=false, refreshing=true) so the table renders
+// the cached PRs rather than flashing the loading screen, matching the
+// startup hydration path in NewModelWithOptions. The in-memory CachedClient
+// will fall back to the disk-cached query within its TTL on the subsequent
+// fetch; for older entries the background fetch refreshes the view.
 func (m *Model) switchToActiveView() tea.Cmd {
 	m.selected = 0
 	m.allRows = nil
@@ -849,6 +856,18 @@ func (m *Model) switchToActiveView() tea.Cmd {
 	m.progressCh = nil
 	m.progressDone = 0
 	m.progressTotal = 0
+
+	if !m.cacheDisabled && m.cache != nil {
+		if entry, ok := m.cache.GetForQuery(m.configuredQuery()); ok {
+			samlEntries := cache.ToSAMLErrorEntries(entry.SAMLErrors)
+			m.samlErrors = samlEntries
+			m.allRows = buildRows(entry.PRs, samlEntries)
+			m.applyFilters()
+			m.loading = false
+			m.refreshing = true
+		}
+	}
+
 	return m.fetchPRsCmd(false)
 }
 

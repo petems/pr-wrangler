@@ -1109,6 +1109,77 @@ func TestViewPicker_DemoModeAppliesViewWithoutFetch(t *testing.T) {
 	}
 }
 
+func TestViewPicker_EnterHydratesFromDiskCache(t *testing.T) {
+	// Switching views should consult the on-disk cache for the new view's
+	// query and render cached rows instead of flashing the loading screen.
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	prCache.SetForQuery("q-2",
+		[]github.PR{{Number: 99, Title: "cached for q-2"}},
+		nil,
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "view-0", Query: "q-0", Default: true},
+		{Name: "view-1", Query: "q-1"},
+		{Name: "view-2", Query: "q-2"},
+	}
+
+	m := NewModel(&MockPRFetcher{}, nil, nil, prCache, cfg)
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.loading {
+		t.Error("expected loading=false after disk-cache hit")
+	}
+	if !next.refreshing {
+		t.Error("expected refreshing=true after disk-cache hit")
+	}
+	if len(next.rows) != 1 || next.rows[0].PR.Number != 99 {
+		t.Errorf("expected rows hydrated from disk cache, got %+v", next.rows)
+	}
+	if cmd == nil {
+		t.Fatal("expected background fetch cmd")
+	}
+}
+
+func TestViewPicker_EnterMissingDiskCacheShowsLoading(t *testing.T) {
+	// When the disk cache has no entry for the new view, we should fall back
+	// to the loading screen rather than holding stale rows from the previous
+	// view.
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "view-0", Query: "q-0", Default: true},
+		{Name: "view-1", Query: "q-1"},
+	}
+
+	m := NewModel(&MockPRFetcher{}, nil, nil, prCache, cfg)
+	m.activeViewIndex = 0
+	m.allRows = []PRRow{{}, {}}
+	m.rows = m.allRows
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, _ := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if !next.loading {
+		t.Error("expected loading=true on disk-cache miss")
+	}
+	if len(next.allRows) != 0 {
+		t.Errorf("expected rows cleared on disk-cache miss, got %d", len(next.allRows))
+	}
+}
+
 func TestViewPicker_EnterInvalidatesInFlightFetch(t *testing.T) {
 	// Regression: switching views while a fetch is in flight must drop the
 	// previous fetch's progressCh so a late prsLoadedMsg can't be cached
