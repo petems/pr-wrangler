@@ -387,6 +387,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.config.Views) <= 1 {
 				return m, nil
 			}
+			// Defensive: ensure no other overlays remain visible. The early
+			// returns above already guarantee mutual exclusion, but resetting
+			// here keeps the picker truly modal even if future overlays land
+			// without an early-return guard.
+			m.showHelp = false
+			m.showThemePicker = false
 			m.showViewPicker = true
 			m.viewPickerIndex = m.activeViewIndex
 			return m, nil
@@ -826,6 +832,12 @@ func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
 
 // switchToActiveView clears table state and kicks off a fetch for the
 // active view's query. Used after the view picker commits a change.
+//
+// Invalidating m.progressCh is load-bearing: configuredQuery() now points at
+// the newly-selected view, so a late prsLoadedMsg from the previous fetch
+// would otherwise pass the staleness check (msg.progressCh == m.progressCh)
+// and get cached under the wrong query. Setting m.progressCh to nil makes
+// any in-flight messages from the old channel fail the check and drain.
 func (m *Model) switchToActiveView() tea.Cmd {
 	m.selected = 0
 	m.allRows = nil
@@ -834,6 +846,9 @@ func (m *Model) switchToActiveView() tea.Cmd {
 	m.lastError = nil
 	m.loading = true
 	m.refreshing = false
+	m.progressCh = nil
+	m.progressDone = 0
+	m.progressTotal = 0
 	return m.fetchPRsCmd(false)
 }
 

@@ -1109,6 +1109,55 @@ func TestViewPicker_DemoModeAppliesViewWithoutFetch(t *testing.T) {
 	}
 }
 
+func TestViewPicker_EnterInvalidatesInFlightFetch(t *testing.T) {
+	// Regression: switching views while a fetch is in flight must drop the
+	// previous fetch's progressCh so a late prsLoadedMsg can't be cached
+	// under the newly-selected view's query.
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+
+	staleCh := make(chan tea.Msg, 1)
+	var staleRecv <-chan tea.Msg = staleCh
+	m.progressCh = staleRecv
+	m.progressDone = 4
+	m.progressTotal = 10
+
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.progressCh != nil {
+		t.Error("expected progressCh to be cleared after view switch")
+	}
+	if next.progressDone != 0 || next.progressTotal != 0 {
+		t.Errorf("expected progress counters reset, got done=%d total=%d", next.progressDone, next.progressTotal)
+	}
+	if cmd == nil {
+		t.Fatal("expected fetch cmd, got nil")
+	}
+}
+
+func TestViewPicker_OpensClosingOtherOverlays(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.showHelp = true
+	m.showThemePicker = true
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	// Pre-existing overlays should be closed; either the early-return guard
+	// above blocked 'v' (in which case the picker won't have opened), or 'v'
+	// reached the dispatch block and we closed them defensively. Either way,
+	// help/theme picker must not stay open alongside the view picker.
+	if m.showViewPicker && (m.showHelp || m.showThemePicker) {
+		t.Errorf("overlays should be mutually exclusive: viewPicker=%v help=%v theme=%v",
+			m.showViewPicker, m.showHelp, m.showThemePicker)
+	}
+}
+
 func TestConfiguredQuery_UsesActiveViewIndex(t *testing.T) {
 	m := newMultiViewModel(t, 3)
 
