@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/petems/pr-wrangler/internal/cache"
 	"github.com/petems/pr-wrangler/internal/config"
 	"github.com/petems/pr-wrangler/internal/github"
@@ -146,6 +147,116 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 	if m.styles.TableText == oldText {
 		t.Error("expected styles to update after applying theme")
 	}
+}
+
+func openPickerWithSize(t *testing.T, width, height int) Model {
+	t.Helper()
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	return sendKey(t, next, themePickerKeyPress())
+}
+
+func TestThemePicker_OverlayCentredAfterWindowSize(t *testing.T) {
+	m := openPickerWithSize(t, 120, 30)
+
+	out := m.View().Content
+	if !strings.Contains(out, "Select Theme") {
+		t.Fatal("rendered view should include picker title when picker is open")
+	}
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╮") {
+		t.Fatal("rendered view should include rounded border characters for the modal frame")
+	}
+
+	// Modal placement: the picker frame should sit somewhere inside the
+	// viewport with non-empty content both above and below it. An appended
+	// picker (the no-window-size fallback path) would put the top frame
+	// border at the very bottom of the output instead.
+	lines := strings.Split(out, "\n")
+	topBorderRow := -1
+	for i, l := range lines {
+		if strings.Contains(l, "╭") && strings.Contains(l, "╮") {
+			topBorderRow = i
+			break
+		}
+	}
+	if topBorderRow <= 0 {
+		t.Fatalf("expected modal top border below row 0, got row %d", topBorderRow)
+	}
+	if topBorderRow >= len(lines)-2 {
+		t.Fatalf("modal top border at row %d in %d-line output looks appended, not overlaid", topBorderRow, len(lines))
+	}
+}
+
+func TestThemePicker_OverlayDoesNotOverflowNarrowViewport(t *testing.T) {
+	// Pick a viewport narrower than the picker's natural width so the
+	// renderer must clamp the frame to fit.
+	const viewportWidth = 40
+	m := openPickerWithSize(t, viewportWidth, 20)
+
+	// Inspect the picker frame directly (rather than the full composed
+	// view, which can include dashboard content wider than the viewport).
+	frame := m.renderThemePicker(viewportWidth)
+	for i, line := range strings.Split(frame, "\n") {
+		if w := lipgloss.Width(line); w > viewportWidth {
+			t.Fatalf("picker line %d width %d exceeds viewport width %d: %q", i, w, viewportWidth, line)
+		}
+	}
+}
+
+func TestThemePicker_NavigationKeysAreModal(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.rows = []PRRow{
+		{PR: github.PR{Number: 1, Title: "first"}},
+		{PR: github.PR{Number: 2, Title: "second"}},
+		{PR: github.PR{Number: 3, Title: "third"}},
+	}
+	m.selected = 1
+
+	m = sendKey(t, m, themePickerKeyPress())
+	if !m.showThemePicker {
+		t.Fatal("picker should be open")
+	}
+	startSelected := m.selected
+
+	// Down/up keys must move the picker index, not the dashboard selection.
+	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	m = sendKey(t, m, specialKeyPress(tea.KeyUp))
+	if m.selected != startSelected {
+		t.Errorf("dashboard selection changed while picker open: got %d, want %d", m.selected, startSelected)
+	}
+	if m.themePickerIndex == 0 {
+		t.Error("picker index did not advance after Down keys")
+	}
+
+	// Dashboard shortcuts ('r' refresh, 'o' open) must be intercepted: the
+	// picker stays open and the model returns no command (i.e. no refresh
+	// or browser open fires while the modal is up).
+	assertIntercepted := func(label, text string, code rune) {
+		t.Helper()
+		beforeIdx := m.themePickerIndex
+		updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: text, Code: code}))
+		next, ok := updated.(Model)
+		if !ok {
+			t.Fatalf("%s: Update returned %T, want Model", label, updated)
+		}
+		m = next
+		if cmd != nil {
+			t.Fatalf("%s should be intercepted while picker is open; got cmd %T", label, cmd)
+		}
+		if !m.showThemePicker {
+			t.Errorf("%s should leave picker open", label)
+		}
+		if m.themePickerIndex != beforeIdx {
+			t.Errorf("%s shifted picker index: got %d, want %d", label, m.themePickerIndex, beforeIdx)
+		}
+	}
+	assertIntercepted("'r'", "r", 'r')
+	assertIntercepted("'o'", "o", 'o')
 }
 
 func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
