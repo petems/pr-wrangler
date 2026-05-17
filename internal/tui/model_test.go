@@ -234,15 +234,29 @@ func TestThemePicker_NavigationKeysAreModal(t *testing.T) {
 	}
 
 	// Dashboard shortcuts ('r' refresh, 'o' open) must be intercepted: the
-	// picker stays open and no commands fire.
-	beforeIdx := m.themePickerIndex
-	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "r", Code: 'r'}))
-	if !m.showThemePicker {
-		t.Error("'r' should be intercepted while picker is open")
+	// picker stays open and the model returns no command (i.e. no refresh
+	// or browser open fires while the modal is up).
+	assertIntercepted := func(label, text string, code rune) {
+		t.Helper()
+		beforeIdx := m.themePickerIndex
+		updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: text, Code: code}))
+		next, ok := updated.(Model)
+		if !ok {
+			t.Fatalf("%s: Update returned %T, want Model", label, updated)
+		}
+		m = next
+		if cmd != nil {
+			t.Fatalf("%s should be intercepted while picker is open; got cmd %T", label, cmd)
+		}
+		if !m.showThemePicker {
+			t.Errorf("%s should leave picker open", label)
+		}
+		if m.themePickerIndex != beforeIdx {
+			t.Errorf("%s shifted picker index: got %d, want %d", label, m.themePickerIndex, beforeIdx)
+		}
 	}
-	if m.themePickerIndex != beforeIdx {
-		t.Errorf("'r' shifted picker index: got %d, want %d", m.themePickerIndex, beforeIdx)
-	}
+	assertIntercepted("'r'", "r", 'r')
+	assertIntercepted("'o'", "o", 'o')
 }
 
 func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
