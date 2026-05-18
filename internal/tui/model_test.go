@@ -150,7 +150,7 @@ func TestThemePicker_EnterAppliesAndClosesPicker(t *testing.T) {
 	}
 }
 
-func openPickerWithSize(t *testing.T, width, height int) Model {
+func openThemePickerWithSize(t *testing.T, width, height int) Model {
 	t.Helper()
 	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
@@ -162,7 +162,7 @@ func openPickerWithSize(t *testing.T, width, height int) Model {
 }
 
 func TestThemePicker_OverlayCentredAfterWindowSize(t *testing.T) {
-	m := openPickerWithSize(t, 120, 30)
+	m := openThemePickerWithSize(t, 120, 30)
 
 	out := m.View().Content
 	if !strings.Contains(out, "Select Theme") {
@@ -196,7 +196,7 @@ func TestThemePicker_OverlayDoesNotOverflowNarrowViewport(t *testing.T) {
 	// Pick a viewport narrower than the picker's natural width so the
 	// renderer must clamp the frame to fit.
 	const viewportWidth = 40
-	m := openPickerWithSize(t, viewportWidth, 20)
+	m := openThemePickerWithSize(t, viewportWidth, 20)
 
 	// Inspect the picker frame directly (rather than the full composed
 	// view, which can include dashboard content wider than the viewport).

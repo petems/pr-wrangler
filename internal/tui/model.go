@@ -478,11 +478,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// pickerHelp is the help line shown at the bottom of the picker. Kept short
-// so the picker frame stays narrow enough to fit on small terminals without
-// soft-wrapping (which would invalidate the centring maths).
+// pickerHelp is the help line shown at the bottom of both pickers. The glyphs
+// are short enough to keep the frame narrow on small terminals while still
+// matching the rest of the TUI's Unicode-heavy presentation.
 const pickerHelp = "↑↓ select · ⏎ apply · esc cancel"
 
+// renderPickerFrame is a private helper shared by the theme and view pickers;
+// keeping it in model.go keeps the overlay rendering logic co-located with the
+// picker state machine that drives it.
 func renderPickerFrame(body string, maxWidth int) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
