@@ -478,7 +478,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) renderThemePicker() string {
+// pickerHelp is the help line shown at the bottom of the picker. Kept short
+// so the picker frame stays narrow enough to fit on small terminals without
+// soft-wrapping (which would invalidate the centring maths).
+const pickerHelp = "↑↓ select · ⏎ apply · esc cancel"
+
+func renderPickerFrame(body string, maxWidth int) string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 2)
+	// Constrain only when the natural picker would overflow the viewport.
+	// The border + padding contribute 6 columns (2 border + 4 padding).
+	// Wrapping the body keeps the frame inside maxWidth so lipgloss.Width
+	// reports the true on-screen size after rendering.
+	if maxWidth > 0 {
+		const frameOverhead = 6
+		natural := lipgloss.Width(body) + frameOverhead
+		if natural > maxWidth {
+			inner := maxWidth - frameOverhead
+			if inner < 1 {
+				inner = 1
+			}
+			style = style.Width(inner)
+		}
+	}
+	return style.Render(body)
+}
+
+// renderThemePicker builds the picker frame. When maxWidth > 0 the frame is
+// clamped so the resulting box never exceeds the available terminal width;
+// this prevents the terminal from soft-wrapping the picker, which would make
+// lipgloss.Width/Height misreport its true on-screen size.
+func (m Model) renderThemePicker(maxWidth int) string {
 	lines := make([]string, 0, len(ThemeNames)+3)
 	lines = append(lines, m.styles.HelpCategory.Render("Select Theme"))
 	for i, name := range ThemeNames {
@@ -489,11 +520,45 @@ func (m Model) renderThemePicker() string {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	lines = append(lines, m.styles.Help.Render(pickerHelp))
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return renderPickerFrame(body, maxWidth)
 }
 
-func (m Model) renderViewPicker() string {
+// composePicker overlays a picker as a centred modal on top of the dashboard.
+// When the window size hasn't been received yet (width or height == 0) it
+// falls back to appending the picker after the dashboard, which keeps tests
+// that don't send a WindowSizeMsg stable.
+func (m Model) composePicker(dashboard string, render func(int) string) string {
+	if m.width == 0 || m.height == 0 {
+		return dashboard + "\n\n" + render(0)
+	}
+	picker := render(m.width)
+	pw := lipgloss.Width(picker)
+	ph := lipgloss.Height(picker)
+	x := (m.width - pw) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (m.height - ph) / 2
+	if y < 0 {
+		y = 0
+	}
+	// Pad the dashboard to the full viewport before layering so the
+	// compositor uses terminal dimensions (not the natural string size)
+	// when placing the modal. Without this, a dashboard shorter than the
+	// terminal causes the modal to render at the top of the viewport
+	// rather than the true vertical centre.
+	canvas := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, dashboard)
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(canvas),
+		lipgloss.NewLayer(picker).X(x).Y(y).Z(1),
+	).Render()
+}
+
+// renderViewPicker mirrors renderThemePicker so the view selector behaves like
+// the existing theme selector, including width clamping for narrow terminals.
+func (m Model) renderViewPicker(maxWidth int) string {
 	lines := make([]string, 0, len(m.config.Views)+3)
 	lines = append(lines, m.styles.HelpCategory.Render("Select View"))
 	for i, view := range m.config.Views {
@@ -508,8 +573,9 @@ func (m Model) renderViewPicker() string {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	lines = append(lines, m.styles.Help.Render(pickerHelp))
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return renderPickerFrame(body, maxWidth)
 }
 
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
@@ -524,7 +590,14 @@ const cowsayDashboard = "" +
 	"                ||     ||"
 
 func (m Model) View() tea.View {
-	v := tea.NewView(m.viewContent())
+	content := m.viewContent()
+	switch {
+	case m.showViewPicker:
+		content = m.composePicker(content, m.renderViewPicker)
+	case m.showThemePicker:
+		content = m.composePicker(content, m.renderThemePicker)
+	}
+	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
 }
@@ -575,16 +648,6 @@ func (m Model) viewContent() string {
 	if m.showHelp {
 		b.WriteString("\n\n")
 		b.WriteString(m.renderHelp())
-	}
-
-	if m.showThemePicker {
-		b.WriteString("\n\n")
-		b.WriteString(m.renderThemePicker())
-	}
-
-	if m.showViewPicker {
-		b.WriteString("\n\n")
-		b.WriteString(m.renderViewPicker())
 	}
 
 	return b.String()
