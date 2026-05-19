@@ -43,6 +43,18 @@ Sleep 1500ms
 Type "?"
 Sleep 500ms
 
+# Open the view picker, navigate through the configured views, and apply.
+Type "v"
+Sleep 1000ms
+Down
+Sleep 500ms
+Down
+Sleep 500ms
+Up
+Sleep 500ms
+Enter
+Sleep 1500ms
+
 # Open the theme picker and switch to Solarized to show live re-theming.
 Type "t"
 Sleep 800ms

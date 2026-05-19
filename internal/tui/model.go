@@ -73,6 +73,11 @@ type Model struct {
 	showThemePicker  bool
 	themePickerIndex int
 
+	// View picker overlay state (mirrors theme picker).
+	activeViewIndex int
+	showViewPicker  bool
+	viewPickerIndex int
+
 	notification string
 
 	// Sessions
@@ -113,18 +118,19 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 	}
 
 	m := Model{
-		ghClient:      ghClient,
-		cachedClient:  github.NewCachedClient(ghClient, cacheTTL),
-		sessionMgr:    sessionMgr,
-		sessionStore:  sessionStore,
-		cache:         prCache,
-		cacheDisabled: opts.DisableCache,
-		config:        cfg,
-		styles:        styles,
-		loading:       true,
-		spinner:       s,
-		prSessions:    make(map[int]tmux.PRSession),
-		browserOpener: defaultOpenBrowser,
+		ghClient:        ghClient,
+		cachedClient:    github.NewCachedClient(ghClient, cacheTTL),
+		sessionMgr:      sessionMgr,
+		sessionStore:    sessionStore,
+		cache:           prCache,
+		cacheDisabled:   opts.DisableCache,
+		config:          cfg,
+		styles:          styles,
+		loading:         true,
+		spinner:         s,
+		prSessions:      make(map[int]tmux.PRSession),
+		browserOpener:   defaultOpenBrowser,
+		activeViewIndex: 0,
 	}
 
 	if !opts.DisableCache && prCache != nil {
@@ -154,6 +160,16 @@ func NewDemoModel(cfg config.Config, count int) Model {
 	s.Style = styles.Loading
 
 	rows, samlErrors := buildDemoRows(count)
+
+	// Ensure the demo always has multiple views so the picker overlay and
+	// header indicator are exercised by the preview pipeline.
+	if len(cfg.Views) < 2 {
+		cfg.Views = []config.View{
+			{Name: "My PRs", Query: "author:@me is:open", Default: true},
+			{Name: "Review Requested", Query: "review-requested:@me is:open"},
+			{Name: "Org PRs", Query: "org:example is:open is:pr"},
+		}
+	}
 
 	return Model{
 		config:        cfg,
@@ -234,6 +250,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "?", "esc":
 				m.showHelp = false
+			}
+			return m, nil
+		}
+
+		// While the view picker is open, intercept all keys so the table
+		// (and other shortcuts) don't see them.
+		if m.showViewPicker {
+			switch msg.String() {
+			case "up":
+				if m.viewPickerIndex > 0 {
+					m.viewPickerIndex--
+				}
+			case "down":
+				if m.viewPickerIndex < len(m.config.Views)-1 {
+					m.viewPickerIndex++
+				}
+			case "enter":
+				m.showViewPicker = false
+				if m.viewPickerIndex == m.activeViewIndex {
+					return m, nil
+				}
+				m.activeViewIndex = m.viewPickerIndex
+				if m.demoMode {
+					m.notification = fmt.Sprintf("demo mode: switched to view %q (no fetch)", m.config.Views[m.activeViewIndex].Name)
+					return m, nil
+				}
+				return m, m.switchToActiveView()
+			case "esc":
+				m.showViewPicker = false
 			}
 			return m, nil
 		}
@@ -337,6 +382,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			return m, nil
+		case "v":
+			if len(m.config.Views) <= 1 {
+				return m, nil
+			}
+			// Defensive: ensure no other overlays remain visible. The early
+			// returns above already guarantee mutual exclusion, but resetting
+			// here keeps the picker truly modal even if future overlays land
+			// without an early-return guard.
+			m.showHelp = false
+			m.showThemePicker = false
+			m.showViewPicker = true
+			m.viewPickerIndex = m.activeViewIndex
 			return m, nil
 		}
 
@@ -442,18 +500,27 @@ func (m Model) renderThemePicker(maxWidth int) string {
 	lines = append(lines, "")
 	lines = append(lines, m.styles.Help.Render(themePickerHelp))
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return frameModal(body, maxWidth)
+}
+
+// modalFrameOverhead is the horizontal columns consumed by the rounded
+// border (2) + padding (4) applied by frameModal. Renderers that clamp
+// their body to a max width subtract this from the viewport.
+const modalFrameOverhead = 6
+
+// frameModal wraps body in the shared modal chrome: rounded border with
+// horizontal padding. When maxWidth > 0 and the natural body would push
+// the frame past maxWidth, the body is wrapped so the rendered frame fits
+// inside the viewport — required because a soft-wrapped frame would make
+// lipgloss.Width/Height misreport its on-screen size and break centring.
+func frameModal(body string, maxWidth int) string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 2)
-	// Constrain only when the natural picker would overflow the viewport.
-	// The border + padding contribute 6 columns (2 border + 4 padding).
-	// Wrapping the body keeps the frame inside maxWidth so lipgloss.Width
-	// reports the true on-screen size after rendering.
 	if maxWidth > 0 {
-		const frameOverhead = 6
-		natural := lipgloss.Width(body) + frameOverhead
+		natural := lipgloss.Width(body) + modalFrameOverhead
 		if natural > maxWidth {
-			inner := maxWidth - frameOverhead
+			inner := maxWidth - modalFrameOverhead
 			if inner < 1 {
 				inner = 1
 			}
@@ -463,26 +530,30 @@ func (m Model) renderThemePicker(maxWidth int) string {
 	return style.Render(body)
 }
 
-// composeThemePicker overlays the theme picker as a centred modal on top of
-// the dashboard. When the picker is closed it returns the dashboard
-// unchanged. When the window size hasn't been received yet
-// (width or height == 0) it falls back to appending the picker after the
-// dashboard, which keeps tests that don't send a WindowSizeMsg stable.
-func (m Model) composeThemePicker(dashboard string) string {
-	if !m.showThemePicker {
+// composeModal overlays a pre-rendered modal as a centred layer on top of
+// the dashboard. When modal is empty it returns the dashboard unchanged.
+// When the window size hasn't been received yet (width or height == 0) it
+// falls back to appending the modal after the dashboard, which keeps tests
+// that don't send a WindowSizeMsg stable.
+//
+// All overlays (theme picker, help, future additions) must go through this
+// helper rather than appending to viewContent. Appending makes the overlay
+// clip off short terminals; the compositor centres it regardless of
+// dashboard height.
+func (m Model) composeModal(dashboard, modal string) string {
+	if modal == "" {
 		return dashboard
 	}
 	if m.width == 0 || m.height == 0 {
-		return dashboard + "\n\n" + m.renderThemePicker(0)
+		return dashboard + "\n\n" + modal
 	}
-	picker := m.renderThemePicker(m.width)
-	pw := lipgloss.Width(picker)
-	ph := lipgloss.Height(picker)
-	x := (m.width - pw) / 2
+	mw := lipgloss.Width(modal)
+	mh := lipgloss.Height(modal)
+	x := (m.width - mw) / 2
 	if x < 0 {
 		x = 0
 	}
-	y := (m.height - ph) / 2
+	y := (m.height - mh) / 2
 	if y < 0 {
 		y = 0
 	}
@@ -494,8 +565,47 @@ func (m Model) composeThemePicker(dashboard string) string {
 	canvas := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, dashboard)
 	return lipgloss.NewCompositor(
 		lipgloss.NewLayer(canvas),
-		lipgloss.NewLayer(picker).X(x).Y(y).Z(1),
+		lipgloss.NewLayer(modal).X(x).Y(y).Z(1),
 	).Render()
+}
+
+// renderViewPicker builds the view picker frame. When maxWidth > 0 the
+// frame is clamped so the resulting box never exceeds the available
+// terminal width, matching renderThemePicker's contract.
+func (m Model) renderViewPicker(maxWidth int) string {
+	lines := make([]string, 0, len(m.config.Views)+3)
+	lines = append(lines, m.styles.HelpCategory.Render("Select View"))
+	for i, view := range m.config.Views {
+		label := view.Name
+		if view.Query != "" {
+			label = fmt.Sprintf("%s  %s", view.Name, m.styles.Help.Render("("+view.Query+")"))
+		}
+		if i == m.viewPickerIndex {
+			lines = append(lines, m.styles.Indicator.Render("> ")+m.styles.SelectedRow.Render(label))
+		} else {
+			lines = append(lines, "  "+m.styles.Help.Render(label))
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, m.styles.Help.Render("↑↓: select | enter: apply | esc: cancel"))
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return frameModal(body, maxWidth)
+}
+
+// activeOverlay returns the modal body that should be composed over the
+// dashboard, or "" when no overlay is open. Overlays are mutually
+// exclusive (see DESIGN.md), so the order here is the precedence used when
+// new overlays are added.
+func (m Model) activeOverlay() string {
+	switch {
+	case m.showThemePicker:
+		return m.renderThemePicker(m.width)
+	case m.showViewPicker:
+		return m.renderViewPicker(m.width)
+	case m.showHelp:
+		return m.renderHelp(m.width)
+	}
+	return ""
 }
 
 // cowsayDashboard is the static cowsay shown in the main dashboard view.
@@ -510,7 +620,7 @@ const cowsayDashboard = "" +
 	"                ||     ||"
 
 func (m Model) View() tea.View {
-	v := tea.NewView(m.composeThemePicker(m.viewContent()))
+	v := tea.NewView(m.composeModal(m.viewContent(), m.activeOverlay()))
 	v.AltScreen = true
 	return v
 }
@@ -523,6 +633,10 @@ func (m Model) viewContent() string {
 	var b strings.Builder
 	b.WriteString(cowsayDashboard + "\n\n")
 	b.WriteString(m.styles.Title.Render("PR Wrangler"))
+	if len(m.config.Views) > 1 && m.activeViewIndex >= 0 && m.activeViewIndex < len(m.config.Views) {
+		name := m.config.Views[m.activeViewIndex].Name
+		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [view: %s (%d/%d)]", name, m.activeViewIndex+1, len(m.config.Views))))
+	}
 	if q := m.configuredQuery(); q != "" {
 		b.WriteString(m.styles.Help.Render(fmt.Sprintf("  [query: %s]", q)))
 	}
@@ -554,10 +668,10 @@ func (m Model) viewContent() string {
 
 	b.WriteString(m.buildHelpLine())
 
-	if m.showHelp {
-		b.WriteString("\n\n")
-		b.WriteString(m.renderHelp())
-	}
+	// Overlays (help, theme picker, view picker, future modals) are
+	// composed by View() via composeModal so they always sit centred on top
+	// of the dashboard rather than clipping off the bottom of short
+	// terminals.
 
 	return b.String()
 }
@@ -753,12 +867,16 @@ func centerLine(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-// configuredQuery returns the user's configured search query, or "" if none.
+// configuredQuery returns the active view's search query, or "" if no
+// views are configured or the active index is out of range.
 func (m Model) configuredQuery() string {
 	if len(m.config.Views) == 0 {
 		return ""
 	}
-	return m.config.Views[0].Query
+	if m.activeViewIndex < 0 || m.activeViewIndex >= len(m.config.Views) {
+		return ""
+	}
+	return m.config.Views[m.activeViewIndex].Query
 }
 
 // progressBarWidth picks a sensible bar width for the given terminal width.
@@ -796,6 +914,47 @@ func (m *Model) refreshCmd() tea.Cmd {
 
 func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
 	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache)
+}
+
+// switchToActiveView resets table state for the new view and kicks off a
+// fetch for its query. Used after the view picker commits a change.
+//
+// Invalidating m.progressCh is load-bearing: configuredQuery() now points at
+// the newly-selected view, so a late prsLoadedMsg from the previous fetch
+// would otherwise pass the staleness check (msg.progressCh == m.progressCh)
+// and get cached under the wrong query. Setting m.progressCh to nil makes
+// any in-flight messages from the old channel fail the check and drain.
+//
+// When the on-disk cache has an entry for the new view's query we hydrate
+// from it immediately (loading=false, refreshing=true) so the table renders
+// the cached PRs rather than flashing the loading screen, matching the
+// startup hydration path in NewModelWithOptions. The in-memory CachedClient
+// will fall back to the disk-cached query within its TTL on the subsequent
+// fetch; for older entries the background fetch refreshes the view.
+func (m *Model) switchToActiveView() tea.Cmd {
+	m.selected = 0
+	m.allRows = nil
+	m.rows = nil
+	m.samlErrors = nil
+	m.lastError = nil
+	m.loading = true
+	m.refreshing = false
+	m.progressCh = nil
+	m.progressDone = 0
+	m.progressTotal = 0
+
+	if !m.cacheDisabled && m.cache != nil {
+		if entry, ok := m.cache.GetForQuery(m.configuredQuery()); ok {
+			samlEntries := cache.ToSAMLErrorEntries(entry.SAMLErrors)
+			m.samlErrors = samlEntries
+			m.allRows = buildRows(entry.PRs, samlEntries)
+			m.applyFilters()
+			m.loading = false
+			m.refreshing = true
+		}
+	}
+
+	return m.fetchPRsCmd(false)
 }
 
 func (m *Model) discoverSessionsCmd() tea.Cmd {
@@ -1076,6 +1235,7 @@ var helpEntries = []helpEntry{
 	{"o", "o", "open", "open selected PR in browser"},
 	{"a", "a", "authorize SAML", "open SAML authorization URL for selected PR"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
+	{"v", "v", "switch view", "open the view picker to switch between configured views"},
 	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
 }
@@ -1088,20 +1248,30 @@ func (m Model) buildHelpLine() string {
 	return m.styles.Help.Render(strings.Join(parts, " | "))
 }
 
-func (m Model) renderHelp() string {
+// helpModalDismiss is the dismiss hint appended to the help overlay so the
+// modal stands on its own without relying on the dashboard help line for the
+// close binding. Kept short to match the theme picker's footer width.
+const helpModalDismiss = "? / esc · dismiss"
+
+// renderHelp builds the keyboard-help modal frame. When maxWidth > 0 the
+// frame is clamped to fit the viewport (see frameModal for the rationale).
+func (m Model) renderHelp(maxWidth int) string {
 	keyWidth := 0
 	for _, e := range helpEntries {
 		if w := lipgloss.Width(e.longKey); w > keyWidth {
 			keyWidth = w
 		}
 	}
-	lines := make([]string, 0, len(helpEntries)+1)
+	lines := make([]string, 0, len(helpEntries)+3)
 	lines = append(lines, m.styles.HelpCategory.Render("Keyboard"))
 	for _, e := range helpEntries {
 		padding := strings.Repeat(" ", keyWidth-lipgloss.Width(e.longKey)+2)
 		lines = append(lines, m.styles.Help.Render(e.longKey+padding+e.longDesc))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	lines = append(lines, "")
+	lines = append(lines, m.styles.Help.Render(helpModalDismiss))
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return frameModal(body, maxWidth)
 }
 
 func extractRepoName(nameWithOwner string) string {
