@@ -300,6 +300,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if m.searchActive {
 			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
 			case "enter":
 				m.searchQuery = strings.TrimSpace(m.searchDraft)
 				m.searchActive = false
@@ -1134,11 +1136,11 @@ func sortRows(rows []PRRow, mode SortMode) {
 		})
 	case SortDateDesc:
 		sort.SliceStable(rows, func(i, j int) bool {
-			return rowSortTime(rows[i]).After(rowSortTime(rows[j]))
+			return compareRowDates(rows[i], rows[j], true)
 		})
 	case SortDateAsc:
 		sort.SliceStable(rows, func(i, j int) bool {
-			return rowSortTime(rows[i]).Before(rowSortTime(rows[j]))
+			return compareRowDates(rows[i], rows[j], false)
 		})
 	case SortGitHub:
 		return
@@ -1159,6 +1161,30 @@ func rowSortTime(row PRRow) time.Time {
 		return row.PR.UpdatedAt
 	}
 	return row.PR.CreatedAt
+}
+
+// compareRowDates orders two rows by sort time. Rows with a zero timestamp
+// (e.g. cached SAML placeholders from older caches missing created/updated
+// fields) are treated as "unknown" and always sort to the bottom, regardless
+// of asc/desc direction, so they never displace real PRs.
+func compareRowDates(a, b PRRow, descending bool) bool {
+	ta := rowSortTime(a)
+	tb := rowSortTime(b)
+	aZero := ta.IsZero()
+	bZero := tb.IsZero()
+	if aZero && bZero {
+		return false
+	}
+	if aZero {
+		return false
+	}
+	if bZero {
+		return true
+	}
+	if descending {
+		return ta.After(tb)
+	}
+	return ta.Before(tb)
 }
 
 func formatTableTime(value time.Time) string {

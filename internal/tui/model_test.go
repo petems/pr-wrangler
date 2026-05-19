@@ -438,6 +438,30 @@ func TestDateSortModesUseUpdatedAt(t *testing.T) {
 	}
 }
 
+// TestDateSortModesPushZeroTimestampsLast ensures that rows whose CreatedAt
+// and UpdatedAt are both zero (e.g. cached SAML placeholders from older cache
+// files that predate the timestamp fields) are sorted to the bottom in both
+// directions instead of leading the "oldest" view.
+func TestDateSortModesPushZeroTimestampsLast(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	rows := []PRRow{
+		testRowWithUpdatedAt(1, "Has time A", now.Add(-2*time.Hour)),
+		testRowWithUpdatedAt(2, "No time", time.Time{}),
+		testRowWithUpdatedAt(3, "Has time B", now.Add(-1*time.Hour)),
+	}
+	rows[1].PR.CreatedAt = time.Time{}
+
+	sortRows(rows, SortDateAsc)
+	if got, want := rowNumbers(rows), []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date oldest order with zero ts = %v, want %v", got, want)
+	}
+
+	sortRows(rows, SortDateDesc)
+	if got, want := rowNumbers(rows), []int{3, 1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date newest order with zero ts = %v, want %v", got, want)
+	}
+}
+
 func TestRenderTableShowsCreatedAndUpdatedColumns(t *testing.T) {
 	createdAt := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
 	updatedAt := time.Date(2026, 5, 16, 11, 45, 0, 0, time.UTC)
@@ -456,6 +480,30 @@ func TestRenderTableShowsCreatedAndUpdatedColumns(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered table missing %q:\n%s", want, rendered)
 		}
+	}
+}
+
+func TestSlashSearchCtrlCStillQuits(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Fix payment retry", github.PRStatusCIFailing, github.ActionFixCI),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("/"))
+	if !m.searchActive {
+		t.Fatal("search should be active after pressing /")
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	if _, ok := updated.(Model); !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c during search should return a quit command, got nil")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Fatalf("ctrl+c during search returned %v, want tea.Quit", msg)
 	}
 }
 
