@@ -84,6 +84,78 @@ func TestFetchPRsCmdUsesCacheUnlessRefreshBypasses(t *testing.T) {
 	}
 }
 
+// TestOverlappingFetchesIgnoreStaleStart simulates two rapid refresh
+// triggers whose start messages arrive at the main loop out of order
+// (fetch B's start first, then fetch A's). The stale start, the stale
+// progress, and the stale loaded message from fetch A must not override
+// or supersede the state established by fetch B.
+func TestOverlappingFetchesIgnoreStaleStart(t *testing.T) {
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 1, Title: "ignored"}}}
+	m := NewModel(fetcher, nil, nil, nil, config.DefaultConfig())
+
+	// Fetch A is dispatched first; trigger code bumps fetchSequence to 2.
+	m.fetchSequence++
+	chA := make(chan tea.Msg, 4)
+	idA := m.fetchSequence
+
+	// Fetch B is dispatched second; trigger code bumps fetchSequence to 3.
+	m.fetchSequence++
+	chB := make(chan tea.Msg, 4)
+	idB := m.fetchSequence
+
+	// Fetch B's start arrives first and is accepted.
+	updated, _ := m.Update(prsFetchStartedMsg{progressCh: chB, fetchID: idB})
+	m = updated.(Model)
+	if m.progressCh != (<-chan tea.Msg)(chB) {
+		t.Fatalf("fetch B start should set m.progressCh to chB")
+	}
+
+	// Fetch A's late start arrives. It must not replace m.progressCh
+	// (which now points at fetch B's channel) and must not reset the
+	// progress counters that belong to fetch B.
+	updated, _ = m.Update(prsFetchStartedMsg{progressCh: chA, fetchID: idA})
+	m = updated.(Model)
+	if m.progressCh != (<-chan tea.Msg)(chB) {
+		t.Fatalf("stale start from fetch A overrode active fetch B: m.progressCh now = %p, want chB = %p", m.progressCh, chB)
+	}
+
+	// Stale progress from fetch A must not mutate state.
+	updated, _ = m.Update(prsProgressMsg{progressCh: chA, fetchID: idA, done: 9, total: 9})
+	m = updated.(Model)
+	if m.progressDone == 9 || m.progressTotal == 9 {
+		t.Fatalf("stale progress from fetch A updated counters: done=%d total=%d", m.progressDone, m.progressTotal)
+	}
+
+	// Fetch B's progress is accepted.
+	updated, _ = m.Update(prsProgressMsg{progressCh: chB, fetchID: idB, done: 3, total: 7})
+	m = updated.(Model)
+	if m.progressDone != 3 || m.progressTotal != 7 {
+		t.Fatalf("fetch B progress not applied: done=%d total=%d, want 3/7", m.progressDone, m.progressTotal)
+	}
+
+	// Stale loaded from fetch A must not populate rows.
+	updated, _ = m.Update(prsLoadedMsg{
+		progressCh: chA,
+		fetchID:    idA,
+		prs:        []github.PR{{Number: 99, Title: "stale", State: github.PRStateOpen}},
+	})
+	m = updated.(Model)
+	if len(m.allRows) != 0 {
+		t.Fatalf("stale loaded from fetch A populated %d row(s); want 0", len(m.allRows))
+	}
+
+	// Fetch B's loaded completes the cycle.
+	updated, _ = m.Update(prsLoadedMsg{
+		progressCh: chB,
+		fetchID:    idB,
+		prs:        []github.PR{{Number: 2, Title: "winner", State: github.PRStateOpen}},
+	})
+	m = updated.(Model)
+	if len(m.allRows) != 1 || m.allRows[0].PR.Number != 2 {
+		t.Fatalf("fetch B loaded should leave one row (PR #2), got rows=%+v", m.allRows)
+	}
+}
+
 func TestModelDisableCacheSkipsDiskPreloadAndInMemoryCache(t *testing.T) {
 	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
 	prCache.SetForQuery("author:@me is:open", []github.PR{{Number: 1, Title: "from disk"}}, nil)
@@ -575,10 +647,11 @@ func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
 
 func TestSelection_LoadedRowsClampNegativeSelection(t *testing.T) {
 	progressCh := make(chan tea.Msg)
-	m := Model{selected: -1, progressCh: progressCh}
+	m := Model{selected: -1, progressCh: progressCh, fetchSequence: 1}
 
 	updated, _ := m.Update(prsLoadedMsg{
 		progressCh: progressCh,
+		fetchID:    1,
 		prs: []github.PR{
 			{Number: 1, Title: "Open PR", State: github.PRStateOpen},
 		},

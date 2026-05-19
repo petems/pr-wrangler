@@ -114,6 +114,15 @@ type Model struct {
 	progressDone  int
 	progressTotal int
 
+	// fetchSequence is the monotonically increasing identifier for the most
+	// recently dispatched PR fetch. It is incremented in the synchronous
+	// trigger code (Update handlers and switchToActiveView) and stamped onto
+	// every message that fetch produces. Update only accepts a fetch
+	// message when its fetchID matches m.fetchSequence; older messages are
+	// drained from their channel but ignored, so an out-of-order start
+	// message from a superseded fetch can't override the active fetch.
+	fetchSequence uint64
+
 	// Overlays
 	showHelp         bool
 	showThemePicker  bool
@@ -182,6 +191,7 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 		browserOpener:   defaultOpenBrowser,
 		activeViewIndex: defaultViewIndex(cfg.Views),
 		sortMode:        SortPriority,
+		fetchSequence:   1,
 	}
 
 	if !opts.DisableCache && prCache != nil {
@@ -236,6 +246,7 @@ func NewDemoModel(cfg config.Config, count int) Model {
 		browserOpener:   noopBrowserOpener,
 		activeViewIndex: defaultViewIndex(cfg.Views),
 		sortMode:        SortPriority,
+		fetchSequence:   1,
 	}
 	m.applyFilters()
 	return m
@@ -415,7 +426,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.refreshing = true
 			}
-			return m, m.refreshCmd()
+			// Claim a new fetchID synchronously so any in-flight messages
+			// from the previous fetch (including their start message) are
+			// rejected as stale by the message handlers below.
+			m.fetchSequence++
+			cmd := m.refreshCmd()
+			return m, cmd
 		case "?":
 			m.showHelp = !m.showHelp
 		case "enter", "c":
@@ -502,6 +518,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case prsFetchStartedMsg:
+		// Stale start (a later trigger has already claimed a higher
+		// fetchID before this start message reached the main loop).
+		// Don't replace m.progressCh, but drain the channel so the
+		// goroutine isn't blocked on a full buffer.
+		if msg.fetchID != m.fetchSequence {
+			return m, waitForFetchMsgCmd(msg.progressCh)
+		}
 		m.progressCh = msg.progressCh
 		m.progressDone = 0
 		m.progressTotal = 0
@@ -510,7 +533,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prsProgressMsg:
 		// Drop messages from a superseded fetch. Keep draining their
 		// channel so the old goroutine isn't blocked on a full buffer.
-		if msg.progressCh != m.progressCh {
+		if msg.fetchID != m.fetchSequence {
 			return m, waitForFetchMsgCmd(msg.progressCh)
 		}
 		m.progressDone = msg.done
@@ -519,7 +542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prsLoadedMsg:
 		// Stale completion — drain to channel close and discard.
-		if msg.progressCh != m.progressCh {
+		if msg.fetchID != m.fetchSequence {
 			return m, waitForFetchMsgCmd(msg.progressCh)
 		}
 		m.loading = false
@@ -1035,8 +1058,14 @@ func (m *Model) refreshCmd() tea.Cmd {
 	return m.fetchPRsCmd(true)
 }
 
+// fetchPRsCmd builds the Cmd that runs the fetch, stamped with the current
+// m.fetchSequence. Trigger sites (the "r" handler, switchToActiveView, and
+// Init via NewModel's seeded fetchSequence) own the responsibility for
+// bumping fetchSequence before they call this — keeping the bump
+// synchronous with the trigger means the held Model carries the new
+// fetchID before any message can race back to the main loop.
 func (m *Model) fetchPRsCmd(bypassCache bool) tea.Cmd {
-	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache)
+	return fetchPRsCmd(m.cachedClient, m.configuredQuery(), bypassCache, m.fetchSequence)
 }
 
 // switchToActiveView resets table state for the new view and kicks off a
@@ -1065,6 +1094,12 @@ func (m *Model) switchToActiveView() tea.Cmd {
 	m.progressCh = nil
 	m.progressDone = 0
 	m.progressTotal = 0
+	// Bumping fetchSequence is what actually retires the prior fetch's
+	// identity; messages from the old fetch will fail the fetchID check
+	// in Update and drain without affecting state. The progressCh = nil
+	// above is now redundant for staleness but is kept so the loading
+	// renderer sees a clean slate.
+	m.fetchSequence++
 
 	if !m.cacheDisabled && m.cache != nil {
 		if entry, ok := m.cache.GetForQuery(m.configuredQuery()); ok {
