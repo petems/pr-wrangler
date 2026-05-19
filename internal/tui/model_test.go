@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1436,6 +1438,97 @@ func TestViewPicker_OpensClosingOtherOverlays(t *testing.T) {
 	if m.showViewPicker && (m.showHelp || m.showThemePicker) {
 		t.Errorf("overlays should be mutually exclusive: viewPicker=%v help=%v theme=%v",
 			m.showViewPicker, m.showHelp, m.showThemePicker)
+	}
+}
+
+func TestNewModel_StartsOnDefaultFlaggedView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0"},
+		{Name: "second", Query: "q-1", Default: true},
+		{Name: "third", Query: "q-2"},
+	}
+	m := NewModel(nil, nil, nil, nil, cfg)
+	if m.activeViewIndex != 1 {
+		t.Errorf("activeViewIndex: got %d, want 1 (the Default-flagged view)", m.activeViewIndex)
+	}
+}
+
+func TestNewModel_FallsBackToFirstViewWhenNoDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0"},
+		{Name: "second", Query: "q-1"},
+	}
+	m := NewModel(nil, nil, nil, nil, cfg)
+	if m.activeViewIndex != 0 {
+		t.Errorf("activeViewIndex: got %d, want 0 (no Default flag set)", m.activeViewIndex)
+	}
+}
+
+func TestViewPicker_NavigatesWithVimKeys(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	if m.viewPickerIndex != 1 {
+		t.Errorf("after j: got %d, want 1", m.viewPickerIndex)
+	}
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	if m.viewPickerIndex != 2 {
+		t.Errorf("after second j: got %d, want 2", m.viewPickerIndex)
+	}
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "k", Code: 'k'}))
+	if m.viewPickerIndex != 1 {
+		t.Errorf("after k: got %d, want 1", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_EnterPersistsDefaultFlagToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0", Default: true},
+		{Name: "second", Query: "q-1"},
+		{Name: "third", Query: "q-2"},
+	}
+	cfg.Path = path
+	if err := config.Save(cfg, path); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	m := NewModel(nil, nil, nil, nil, cfg)
+	m.demoMode = true // skip the live fetch branch so this test stays hermetic
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, _ := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.activeViewIndex != 2 {
+		t.Fatalf("activeViewIndex: got %d, want 2", next.activeViewIndex)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	persisted, err := config.LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("reload saved config: %v", err)
+	}
+	if len(persisted.Views) != 3 {
+		t.Fatalf("persisted views: got %d, want 3 (raw=%q)", len(persisted.Views), raw)
+	}
+	for i, v := range persisted.Views {
+		want := i == 2
+		if v.Default != want {
+			t.Errorf("view %d (%q): Default=%v, want %v (raw=%q)", i, v.Name, v.Default, want, raw)
+		}
 	}
 }
 

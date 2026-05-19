@@ -130,7 +130,7 @@ func NewModelWithOptions(ghClient github.PRFetcher, sessionMgr *tmux.SessionMana
 		spinner:         s,
 		prSessions:      make(map[int]tmux.PRSession),
 		browserOpener:   defaultOpenBrowser,
-		activeViewIndex: 0,
+		activeViewIndex: defaultViewIndex(cfg.Views),
 	}
 
 	if !opts.DisableCache && prCache != nil {
@@ -258,11 +258,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (and other shortcuts) don't see them.
 		if m.showViewPicker {
 			switch msg.String() {
-			case "up":
+			case "up", "k":
 				if m.viewPickerIndex > 0 {
 					m.viewPickerIndex--
 				}
-			case "down":
+			case "down", "j":
 				if m.viewPickerIndex < len(m.config.Views)-1 {
 					m.viewPickerIndex++
 				}
@@ -272,6 +272,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.activeViewIndex = m.viewPickerIndex
+				for i := range m.config.Views {
+					m.config.Views[i].Default = (i == m.activeViewIndex)
+				}
+				if m.config.Path != "" {
+					_ = config.Save(m.config, m.config.Path)
+				}
 				if m.demoMode {
 					m.notification = fmt.Sprintf("demo mode: switched to view %q (no fetch)", m.config.Views[m.activeViewIndex].Name)
 					return m, nil
@@ -569,6 +575,19 @@ func (m Model) composeModal(dashboard, modal string) string {
 	).Render()
 }
 
+// defaultViewIndex returns the index of the first view marked Default
+// in the configured view list, or 0 when no view is flagged. This makes
+// the startup view match the user's saved preference rather than always
+// landing on the first entry.
+func defaultViewIndex(views []config.View) int {
+	for i, v := range views {
+		if v.Default {
+			return i
+		}
+	}
+	return 0
+}
+
 // renderViewPicker builds the view picker frame. When maxWidth > 0 the
 // frame is clamped so the resulting box never exceeds the available
 // terminal width, matching renderThemePicker's contract.
@@ -581,7 +600,7 @@ func (m Model) renderViewPicker(maxWidth int) string {
 			label = fmt.Sprintf("%s  %s", view.Name, m.styles.Help.Render("("+view.Query+")"))
 		}
 		if i == m.viewPickerIndex {
-			lines = append(lines, m.styles.Indicator.Render("> ")+m.styles.SelectedRow.Render(label))
+			lines = append(lines, m.styles.SelectedRow.Render(m.styles.Indicator.Render("> ")+label))
 		} else {
 			lines = append(lines, "  "+m.styles.Help.Render(label))
 		}
