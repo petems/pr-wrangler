@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -276,6 +279,60 @@ func TestThemePicker_EscCancelsWithoutChange(t *testing.T) {
 	}
 	if m.styles.TableText != originalText {
 		t.Error("styles should not change on cancel")
+	}
+}
+
+func openHelpWithSize(t *testing.T, width, height int) Model {
+	t.Helper()
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	next.showHelp = true
+	return next
+}
+
+func TestHelpOverlay_RendersAsCentredModal(t *testing.T) {
+	m := openHelpWithSize(t, 120, 30)
+
+	out := m.View().Content
+	if !strings.Contains(out, "Keyboard") {
+		t.Fatal("rendered view should include help category title when help is open")
+	}
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╮") {
+		t.Fatal("rendered view should include rounded border characters for the modal frame")
+	}
+
+	// Same placement check as the theme picker: top border sits inside the
+	// viewport with content above and below it, not at the bottom edge.
+	lines := strings.Split(out, "\n")
+	topBorderRow := -1
+	for i, l := range lines {
+		if strings.Contains(l, "╭") && strings.Contains(l, "╮") {
+			topBorderRow = i
+			break
+		}
+	}
+	if topBorderRow <= 0 {
+		t.Fatalf("expected modal top border below row 0, got row %d", topBorderRow)
+	}
+	if topBorderRow >= len(lines)-2 {
+		t.Fatalf("modal top border at row %d in %d-line output looks appended, not overlaid", topBorderRow, len(lines))
+	}
+}
+
+func TestHelpOverlay_DoesNotOverflowNarrowViewport(t *testing.T) {
+	// Help is wider than the picker (long key labels + descriptions), so a
+	// 40-col viewport forces frameModal to clamp the body.
+	const viewportWidth = 40
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	frame := m.renderHelp(viewportWidth)
+	for i, line := range strings.Split(frame, "\n") {
+		if w := lipgloss.Width(line); w > viewportWidth {
+			t.Fatalf("help line %d width %d exceeds viewport width %d: %q", i, w, viewportWidth, line)
+		}
 	}
 }
 
@@ -1069,4 +1126,429 @@ func stripANSI(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func viewPickerKeyPress() tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})
+}
+
+func newMultiViewModel(t *testing.T, n int) Model {
+	t.Helper()
+	cfg := config.DefaultConfig()
+	cfg.Views = make([]config.View, n)
+	for i := 0; i < n; i++ {
+		cfg.Views[i] = config.View{Name: fmt.Sprintf("view-%d", i), Query: fmt.Sprintf("q-%d", i)}
+	}
+	return NewModel(nil, nil, nil, nil, cfg)
+}
+
+func TestViewPicker_OpensAtActiveView(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 2
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	if !m.showViewPicker {
+		t.Fatal("expected picker to be open")
+	}
+	if m.viewPickerIndex != 2 {
+		t.Errorf("viewPickerIndex: got %d, want 2", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_SingleViewIsNoop(t *testing.T) {
+	m := newMultiViewModel(t, 1)
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	if m.showViewPicker {
+		t.Error("picker should not open with only one view")
+	}
+}
+
+func TestViewPicker_NavigationBounded(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyUp))
+	if m.viewPickerIndex != 0 {
+		t.Errorf("up at index 0 should be a no-op, got %d", m.viewPickerIndex)
+	}
+
+	for i := 0; i < 5; i++ {
+		m = sendKey(t, m, specialKeyPress(tea.KeyDown))
+	}
+	if m.viewPickerIndex != 2 {
+		t.Errorf("after over-scroll down: got %d, want 2", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_EnterCommitsAndFetches(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+	m.selected = 5
+	m.allRows = make([]PRRow, 10)
+	m.rows = m.allRows
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.showViewPicker {
+		t.Error("picker should be closed after enter")
+	}
+	if next.activeViewIndex != 2 {
+		t.Errorf("activeViewIndex: got %d, want 2", next.activeViewIndex)
+	}
+	if next.selected != 0 {
+		t.Errorf("selected: got %d, want 0", next.selected)
+	}
+	if !next.loading {
+		t.Error("expected loading=true after view switch")
+	}
+	if cmd == nil {
+		t.Fatal("expected fetch cmd, got nil")
+	}
+}
+
+func TestViewPicker_EnterOnActiveViewIsNoFetch(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 1
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+
+	if next.showViewPicker {
+		t.Error("picker should be closed")
+	}
+	if cmd != nil {
+		t.Error("expected no fetch when re-selecting active view")
+	}
+}
+
+func TestViewPicker_EscCancels(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyEsc))
+
+	if m.showViewPicker {
+		t.Error("picker should be closed after esc")
+	}
+	if m.activeViewIndex != 0 {
+		t.Errorf("activeViewIndex changed to %d after cancel", m.activeViewIndex)
+	}
+}
+
+func TestViewPicker_DemoModeAppliesViewWithoutFetch(t *testing.T) {
+	m := NewDemoModel(config.DefaultConfig(), 5)
+	if len(m.config.Views) < 2 {
+		t.Fatalf("demo model should seed multiple views, got %d", len(m.config.Views))
+	}
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.activeViewIndex != 1 {
+		t.Errorf("activeViewIndex: got %d, want 1", next.activeViewIndex)
+	}
+	if cmd != nil {
+		t.Error("demo mode should not return a fetch cmd from the view picker")
+	}
+	if next.notification == "" {
+		t.Error("expected a demo-mode notification after applying view")
+	}
+}
+
+func TestViewPicker_EnterHydratesFromDiskCache(t *testing.T) {
+	// Switching views should consult the on-disk cache for the new view's
+	// query and render cached rows instead of flashing the loading screen.
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	prCache.SetForQuery("q-2",
+		[]github.PR{{Number: 99, Title: "cached for q-2"}},
+		nil,
+	)
+
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "view-0", Query: "q-0", Default: true},
+		{Name: "view-1", Query: "q-1"},
+		{Name: "view-2", Query: "q-2"},
+	}
+
+	m := NewModel(&MockPRFetcher{}, nil, nil, prCache, cfg)
+	m.activeViewIndex = 0
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.loading {
+		t.Error("expected loading=false after disk-cache hit")
+	}
+	if !next.refreshing {
+		t.Error("expected refreshing=true after disk-cache hit")
+	}
+	if len(next.rows) != 1 || next.rows[0].PR.Number != 99 {
+		t.Errorf("expected rows hydrated from disk cache, got %+v", next.rows)
+	}
+	if cmd == nil {
+		t.Fatal("expected background fetch cmd")
+	}
+}
+
+func TestViewPicker_EnterMissingDiskCacheShowsLoading(t *testing.T) {
+	// When the disk cache has no entry for the new view, we should fall back
+	// to the loading screen rather than holding stale rows from the previous
+	// view.
+	prCache := cache.NewCache(t.TempDir() + "/pr-cache.json")
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "view-0", Query: "q-0", Default: true},
+		{Name: "view-1", Query: "q-1"},
+	}
+
+	m := NewModel(&MockPRFetcher{}, nil, nil, prCache, cfg)
+	m.activeViewIndex = 0
+	m.allRows = []PRRow{{}, {}}
+	m.rows = m.allRows
+	m.showViewPicker = true
+	m.viewPickerIndex = 1
+
+	updated, _ := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if !next.loading {
+		t.Error("expected loading=true on disk-cache miss")
+	}
+	if len(next.allRows) != 0 {
+		t.Errorf("expected rows cleared on disk-cache miss, got %d", len(next.allRows))
+	}
+}
+
+func TestViewPicker_EnterInvalidatesInFlightFetch(t *testing.T) {
+	// Regression: switching views while a fetch is in flight must drop the
+	// previous fetch's progressCh so a late prsLoadedMsg can't be cached
+	// under the newly-selected view's query.
+	m := newMultiViewModel(t, 3)
+	m.activeViewIndex = 0
+
+	staleCh := make(chan tea.Msg, 1)
+	var staleRecv <-chan tea.Msg = staleCh
+	m.progressCh = staleRecv
+	m.progressDone = 4
+	m.progressTotal = 10
+
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, cmd := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.progressCh != nil {
+		t.Error("expected progressCh to be cleared after view switch")
+	}
+	if next.progressDone != 0 || next.progressTotal != 0 {
+		t.Errorf("expected progress counters reset, got done=%d total=%d", next.progressDone, next.progressTotal)
+	}
+	if cmd == nil {
+		t.Fatal("expected fetch cmd, got nil")
+	}
+}
+
+func TestViewPicker_OverlayCentredAfterWindowSize(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	next = sendKey(t, next, viewPickerKeyPress())
+
+	out := next.View().Content
+	if !strings.Contains(out, "Select View") {
+		t.Fatal("rendered view should include view picker title when picker is open")
+	}
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╮") {
+		t.Fatal("rendered view should include rounded border characters for the modal frame")
+	}
+
+	lines := strings.Split(out, "\n")
+	topBorderRow := -1
+	for i, l := range lines {
+		if strings.Contains(l, "╭") && strings.Contains(l, "╮") {
+			topBorderRow = i
+			break
+		}
+	}
+	if topBorderRow <= 0 {
+		t.Fatalf("expected modal top border below row 0, got row %d", topBorderRow)
+	}
+	if topBorderRow >= len(lines)-2 {
+		t.Fatalf("modal top border at row %d in %d-line output looks appended, not overlaid", topBorderRow, len(lines))
+	}
+}
+
+func TestViewPicker_OverlayDoesNotOverflowNarrowViewport(t *testing.T) {
+	const viewportWidth = 40
+	m := newMultiViewModel(t, 3)
+
+	frame := m.renderViewPicker(viewportWidth)
+	for i, line := range strings.Split(frame, "\n") {
+		if w := lipgloss.Width(line); w > viewportWidth {
+			t.Fatalf("view picker line %d width %d exceeds viewport width %d: %q", i, w, viewportWidth, line)
+		}
+	}
+}
+
+func TestViewPicker_OpensClosingOtherOverlays(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m.showHelp = true
+	m.showThemePicker = true
+
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	// Pre-existing overlays should be closed; either the early-return guard
+	// above blocked 'v' (in which case the picker won't have opened), or 'v'
+	// reached the dispatch block and we closed them defensively. Either way,
+	// help/theme picker must not stay open alongside the view picker.
+	if m.showViewPicker && (m.showHelp || m.showThemePicker) {
+		t.Errorf("overlays should be mutually exclusive: viewPicker=%v help=%v theme=%v",
+			m.showViewPicker, m.showHelp, m.showThemePicker)
+	}
+}
+
+func TestNewModel_StartsOnDefaultFlaggedView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0"},
+		{Name: "second", Query: "q-1", Default: true},
+		{Name: "third", Query: "q-2"},
+	}
+	m := NewModel(nil, nil, nil, nil, cfg)
+	if m.activeViewIndex != 1 {
+		t.Errorf("activeViewIndex: got %d, want 1 (the Default-flagged view)", m.activeViewIndex)
+	}
+}
+
+func TestNewModel_FallsBackToFirstViewWhenNoDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0"},
+		{Name: "second", Query: "q-1"},
+	}
+	m := NewModel(nil, nil, nil, nil, cfg)
+	if m.activeViewIndex != 0 {
+		t.Errorf("activeViewIndex: got %d, want 0 (no Default flag set)", m.activeViewIndex)
+	}
+}
+
+func TestViewPicker_NavigatesWithVimKeys(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+	m = sendKey(t, m, viewPickerKeyPress())
+
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	if m.viewPickerIndex != 1 {
+		t.Errorf("after j: got %d, want 1", m.viewPickerIndex)
+	}
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	if m.viewPickerIndex != 2 {
+		t.Errorf("after second j: got %d, want 2", m.viewPickerIndex)
+	}
+	m = sendKey(t, m, tea.KeyPressMsg(tea.Key{Text: "k", Code: 'k'}))
+	if m.viewPickerIndex != 1 {
+		t.Errorf("after k: got %d, want 1", m.viewPickerIndex)
+	}
+}
+
+func TestViewPicker_EnterPersistsDefaultFlagToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := config.DefaultConfig()
+	cfg.Views = []config.View{
+		{Name: "first", Query: "q-0", Default: true},
+		{Name: "second", Query: "q-1"},
+		{Name: "third", Query: "q-2"},
+	}
+	cfg.Path = path
+	if err := config.Save(cfg, path); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	m := NewModel(nil, nil, nil, nil, cfg)
+	m.demoMode = true // skip the live fetch branch so this test stays hermetic
+	m.showViewPicker = true
+	m.viewPickerIndex = 2
+
+	updated, _ := m.Update(specialKeyPress(tea.KeyEnter))
+	next, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if next.activeViewIndex != 2 {
+		t.Fatalf("activeViewIndex: got %d, want 2", next.activeViewIndex)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	persisted, err := config.LoadFromPath(path)
+	if err != nil {
+		t.Fatalf("reload saved config: %v", err)
+	}
+	if len(persisted.Views) != 3 {
+		t.Fatalf("persisted views: got %d, want 3 (raw=%q)", len(persisted.Views), raw)
+	}
+	for i, v := range persisted.Views {
+		want := i == 2
+		if v.Default != want {
+			t.Errorf("view %d (%q): Default=%v, want %v (raw=%q)", i, v.Name, v.Default, want, raw)
+		}
+	}
+}
+
+func TestConfiguredQuery_UsesActiveViewIndex(t *testing.T) {
+	m := newMultiViewModel(t, 3)
+
+	m.activeViewIndex = 0
+	if got, want := m.configuredQuery(), "q-0"; got != want {
+		t.Errorf("active=0: got %q, want %q", got, want)
+	}
+	m.activeViewIndex = 2
+	if got, want := m.configuredQuery(), "q-2"; got != want {
+		t.Errorf("active=2: got %q, want %q", got, want)
+	}
+	m.activeViewIndex = 99
+	if got := m.configuredQuery(); got != "" {
+		t.Errorf("out-of-range index should return \"\", got %q", got)
+	}
+	m.activeViewIndex = -1
+	if got := m.configuredQuery(); got != "" {
+		t.Errorf("negative index should return \"\", got %q", got)
+	}
 }
