@@ -85,7 +85,7 @@ go install github.com/charmbracelet/freeze@latest
 go install github.com/charmbracelet/vhs@latest
 ```
 
-**If `make preview-image` segfaults on Linux** (`SIGSEGV` / `runtime.memmove` inside `freeze`), install `librsvg2-bin`. `freeze`'s embedded WASM SVG → PNG rasteriser crashes intermittently; when `rsvg-convert` is on `PATH`, `freeze` prefers it and bypasses the WASM renderer entirely. Pair it with `fonts-jetbrains-mono` so the rasterised PNG keeps the column alignment `freeze` declares in its SVG output:
+**If `make preview-image` segfaults on Linux** (`SIGSEGV` / `runtime.memmove` inside `freeze`), and you are on a Debian/Ubuntu-based system, install `librsvg2-bin`. `freeze`'s embedded WASM SVG → PNG rasteriser crashes intermittently; when `rsvg-convert` is on `PATH`, `freeze` prefers it and bypasses the WASM renderer entirely. Pair it with `fonts-jetbrains-mono` so the rasterised PNG keeps the column alignment `freeze` declares in its SVG output:
 
 ```bash
 sudo apt-get update
