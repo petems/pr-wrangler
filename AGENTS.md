@@ -85,6 +85,16 @@ go install github.com/charmbracelet/freeze@latest
 go install github.com/charmbracelet/vhs@latest
 ```
 
+**If `make preview-image` segfaults on Linux** (`SIGSEGV` / `runtime.memmove` inside `freeze`), and you are on a Debian/Ubuntu-based system, install `librsvg2-bin`. `freeze`'s embedded WASM SVG → PNG rasteriser crashes intermittently; when `rsvg-convert` is on `PATH`, `freeze` prefers it and bypasses the WASM renderer entirely. Pair it with `fonts-jetbrains-mono` so the rasterised PNG keeps the column alignment `freeze` declares in its SVG output:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y librsvg2-bin fonts-jetbrains-mono
+fc-cache -f
+```
+
+See [charmbracelet/freeze#203](https://github.com/charmbracelet/freeze/issues/203) for background. CI installs both packages for the same reason — see the `Install freeze` step in `.github/workflows/ci.yml`.
+
 **For agents (Claude Code, Codex, Cursor, etc.):**
 
 1. Run `make preview-image` and read the resulting `preview.png` directly — your multimodal Read tool will render it as an image, which is the most reliable way to verify visual output without an ANSI-aware terminal.
