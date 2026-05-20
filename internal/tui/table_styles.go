@@ -44,7 +44,7 @@ func (m *Model) columnBodyStyle(r PRRow, col int) lipgloss.Style {
 	case 7:
 		return m.actionStyle(r.Action)
 	default:
-		return lipgloss.NewStyle()
+		return lipgloss.NewStyle().Foreground(m.styles.TableText)
 	}
 }
 
