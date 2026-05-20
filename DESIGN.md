@@ -14,18 +14,10 @@ and the async message-flow contract in agent terms, see
 
 ## Product Context
 
-`pr-wrangler` is for open-source maintainers and engineers who work across many
-repositories and keep several pull requests in flight at once. They use it to
-scan PR state quickly, understand what needs attention, and launch focused
-agentic fixes or review follow-up sessions without leaving the terminal.
-
-The product personality is fast, playful, and confident. It should feel like a
-capable terminal operations cockpit with a deliberately silly "PR Wrangler"
-streak: talking bull moments, lasso references, Western-flavored loading states,
-and fun motion are welcome when they support the workflow.
-
-Good references are agentic CLI tools and playful terminal apps such as
-`agent-of-empires`: useful first, but willing to be memorable.
+For the canonical product framing — target users, brand personality, and
+design principles — see [`PRODUCT.md`](./PRODUCT.md). The remainder of this
+document covers the visual system, palette, interaction contract, and
+validation pipeline.
 
 ## Design Intent
 
