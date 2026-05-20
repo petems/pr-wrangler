@@ -243,11 +243,15 @@ func GenerateMockPRs(count int) []github.PR {
 // pre-interleave search ordering so buildRows can splice them back into
 // the row list.
 func MockSAMLErrors() []github.SAMLErrorEntry {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+
 	return []github.SAMLErrorEntry{
 		{
 			Index:             3,
 			RepoNameWithOwner: "internal-org/private-service",
 			PRNumber:          42,
+			CreatedAt:         now.Add(-60 * time.Hour),
+			UpdatedAt:         now.Add(-90 * time.Minute),
 			Err: &github.SAMLAuthError{
 				Message: "Resource protected by organization SAML",
 				AuthURL: "https://github.com/enterprises/internal-org/sso?authorization_request=DEMO123",
@@ -257,6 +261,8 @@ func MockSAMLErrors() []github.SAMLErrorEntry {
 			Index:             7,
 			RepoNameWithOwner: "internal-org/billing-platform",
 			PRNumber:          17,
+			CreatedAt:         now.Add(-54 * time.Hour),
+			UpdatedAt:         now.Add(-4 * time.Hour),
 			Err: &github.SAMLAuthError{
 				Message: "Resource protected by organization SAML",
 				AuthURL: "https://github.com/enterprises/internal-org/sso?authorization_request=DEMO456",

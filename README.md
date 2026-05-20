@@ -229,4 +229,7 @@ PR Wrangler gracefully handles repositories protected by organizational SAML aut
 - `enter` / `c`: Open or switch to Claude session for selected PR
 - `o`: Open selected PR in browser
 - `a`: Authorize SAML access for selected PR (opens authorization URL)
+- `/`: Search visible PR rows by repo, PR number, title, branch, status, date, or action
+- `s`: Cycle sort order (`priority`, GitHub order, repo, PR number, title, Date (Newest), Date (Oldest))
+- `j` / `k` / `↑` / `↓`: Move selection up/down
 - `?`: Toggle help

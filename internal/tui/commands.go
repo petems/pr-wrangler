@@ -11,11 +11,13 @@ import (
 	"github.com/petems/pr-wrangler/internal/tmux"
 )
 
-// prsLoadedMsg is the final message in a fetch sequence. progressCh
-// identifies the source channel so the model can ignore stale completions
-// from a fetch that has been superseded (e.g., user pressed 'r' mid-fetch).
+// prsLoadedMsg is the final message in a fetch sequence. fetchID identifies
+// the source fetch so the model can ignore stale completions from a fetch
+// that has been superseded (e.g., user pressed 'r' mid-fetch). progressCh
+// is retained so the model can keep draining a stale channel until close.
 type prsLoadedMsg struct {
 	progressCh <-chan tea.Msg
+	fetchID    uint64
 	prs        []github.PR
 	samlErrors []github.SAMLErrorEntry
 	err        error
@@ -23,16 +25,21 @@ type prsLoadedMsg struct {
 
 // prsFetchStartedMsg is delivered once the fetch goroutine is running. It
 // carries the channel the model should drain for streaming progress and the
-// final result.
+// final result, plus the fetchID claimed by the trigger so the model can
+// reject start messages from a fetch that has already been superseded
+// (start messages are dispatched from independent goroutines, so two
+// near-simultaneous triggers can deliver their starts out of order).
 type prsFetchStartedMsg struct {
 	progressCh <-chan tea.Msg
+	fetchID    uint64
 }
 
 // prsProgressMsg reports detail-fetch progress: done out of total PRs.
-// progressCh identifies the source channel; messages from a superseded
-// fetch are dropped without updating the model.
+// fetchID identifies the source fetch; messages from a superseded fetch
+// are dropped without updating the model.
 type prsProgressMsg struct {
 	progressCh <-chan tea.Msg
+	fetchID    uint64
 	done       int
 	total      int
 }
@@ -68,8 +75,11 @@ type sessionReadyMsg struct {
 // fetchPRsCmd kicks off the PR fetch in a background goroutine and returns
 // immediately with a prsFetchStartedMsg carrying a channel. The model drains
 // the channel via waitForFetchMsgCmd to receive streaming progress updates
-// and the final prsLoadedMsg.
-func fetchPRsCmd(ghClient *github.CachedClient, query string, bypassCache bool) tea.Cmd {
+// and the final prsLoadedMsg. fetchID is the monotonic sequence number
+// claimed by the trigger; every message from this fetch carries it so the
+// model can reject messages from a superseded fetch even if their start
+// message arrives out of order with respect to a later trigger's start.
+func fetchPRsCmd(ghClient *github.CachedClient, query string, bypassCache bool, fetchID uint64) tea.Cmd {
 	return func() tea.Msg {
 		ch := make(chan tea.Msg, 64)
 		// recv is the receive-only handle stamped onto every message so the
@@ -81,11 +91,11 @@ func fetchPRsCmd(ghClient *github.CachedClient, query string, bypassCache bool) 
 			defer cancel()
 
 			result, err := ghClient.FetchPRsCached(ctx, query, bypassCache, func(done, total int) {
-				ch <- prsProgressMsg{progressCh: recv, done: done, total: total}
+				ch <- prsProgressMsg{progressCh: recv, fetchID: fetchID, done: done, total: total}
 			})
-			ch <- prsLoadedMsg{progressCh: recv, prs: result.PRs, samlErrors: result.Errors, err: err}
+			ch <- prsLoadedMsg{progressCh: recv, fetchID: fetchID, prs: result.PRs, samlErrors: result.Errors, err: err}
 		}()
-		return prsFetchStartedMsg{progressCh: recv}
+		return prsFetchStartedMsg{progressCh: recv, fetchID: fetchID}
 	}
 }
 

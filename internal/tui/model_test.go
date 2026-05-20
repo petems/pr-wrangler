@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -27,6 +29,11 @@ func sendKey(t *testing.T, m Model, key tea.KeyPressMsg) Model {
 
 func themePickerKeyPress() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Text: "t", Code: 't'})
+}
+
+func textKeyPress(text string) tea.KeyPressMsg {
+	r, _ := utf8.DecodeRuneInString(text)
+	return tea.KeyPressMsg(tea.Key{Text: text, Code: r})
 }
 
 func specialKeyPress(code rune) tea.KeyPressMsg {
@@ -74,6 +81,78 @@ func TestFetchPRsCmdUsesCacheUnlessRefreshBypasses(t *testing.T) {
 	drainFetchCmd(t, m.refreshCmd())
 	if got := len(fetcher.Queries); got != 2 {
 		t.Fatalf("refresh should bypass cache; fetch calls = %d, want 2", got)
+	}
+}
+
+// TestOverlappingFetchesIgnoreStaleStart simulates two rapid refresh
+// triggers whose start messages arrive at the main loop out of order
+// (fetch B's start first, then fetch A's). The stale start, the stale
+// progress, and the stale loaded message from fetch A must not override
+// or supersede the state established by fetch B.
+func TestOverlappingFetchesIgnoreStaleStart(t *testing.T) {
+	fetcher := &MockPRFetcher{PRs: []github.PR{{Number: 1, Title: "ignored"}}}
+	m := NewModel(fetcher, nil, nil, nil, config.DefaultConfig())
+
+	// Fetch A is dispatched first; trigger code bumps fetchSequence to 2.
+	m.fetchSequence++
+	chA := make(chan tea.Msg, 4)
+	idA := m.fetchSequence
+
+	// Fetch B is dispatched second; trigger code bumps fetchSequence to 3.
+	m.fetchSequence++
+	chB := make(chan tea.Msg, 4)
+	idB := m.fetchSequence
+
+	// Fetch B's start arrives first and is accepted.
+	updated, _ := m.Update(prsFetchStartedMsg{progressCh: chB, fetchID: idB})
+	m = updated.(Model)
+	if m.progressCh != (<-chan tea.Msg)(chB) {
+		t.Fatalf("fetch B start should set m.progressCh to chB")
+	}
+
+	// Fetch A's late start arrives. It must not replace m.progressCh
+	// (which now points at fetch B's channel) and must not reset the
+	// progress counters that belong to fetch B.
+	updated, _ = m.Update(prsFetchStartedMsg{progressCh: chA, fetchID: idA})
+	m = updated.(Model)
+	if m.progressCh != (<-chan tea.Msg)(chB) {
+		t.Fatalf("stale start from fetch A overrode active fetch B: m.progressCh now = %p, want chB = %p", m.progressCh, chB)
+	}
+
+	// Stale progress from fetch A must not mutate state.
+	updated, _ = m.Update(prsProgressMsg{progressCh: chA, fetchID: idA, done: 9, total: 9})
+	m = updated.(Model)
+	if m.progressDone == 9 || m.progressTotal == 9 {
+		t.Fatalf("stale progress from fetch A updated counters: done=%d total=%d", m.progressDone, m.progressTotal)
+	}
+
+	// Fetch B's progress is accepted.
+	updated, _ = m.Update(prsProgressMsg{progressCh: chB, fetchID: idB, done: 3, total: 7})
+	m = updated.(Model)
+	if m.progressDone != 3 || m.progressTotal != 7 {
+		t.Fatalf("fetch B progress not applied: done=%d total=%d, want 3/7", m.progressDone, m.progressTotal)
+	}
+
+	// Stale loaded from fetch A must not populate rows.
+	updated, _ = m.Update(prsLoadedMsg{
+		progressCh: chA,
+		fetchID:    idA,
+		prs:        []github.PR{{Number: 99, Title: "stale", State: github.PRStateOpen}},
+	})
+	m = updated.(Model)
+	if len(m.allRows) != 0 {
+		t.Fatalf("stale loaded from fetch A populated %d row(s); want 0", len(m.allRows))
+	}
+
+	// Fetch B's loaded completes the cycle.
+	updated, _ = m.Update(prsLoadedMsg{
+		progressCh: chB,
+		fetchID:    idB,
+		prs:        []github.PR{{Number: 2, Title: "winner", State: github.PRStateOpen}},
+	})
+	m = updated.(Model)
+	if len(m.allRows) != 1 || m.allRows[0].PR.Number != 2 {
+		t.Fatalf("fetch B loaded should leave one row (PR #2), got rows=%+v", m.allRows)
 	}
 }
 
@@ -361,6 +440,201 @@ func TestHelpOverlay_InterceptsDashboardKeys(t *testing.T) {
 	}
 }
 
+func TestApplyFilters_DefaultPrioritySortsWorkQueue(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Waiting", github.PRStatusWaitingForReviews, github.ActionNone),
+		testRow(2, "Approved", github.PRStatusApproved, github.ActionMerge),
+		testRow(3, "Feedback", github.PRStatusChangesRequested, github.ActionAddressFeedback),
+		testRow(4, "Rebase", github.PRStatusHasConflicts, github.ActionResolveConflicts),
+		testRow(5, "Draft", github.PRStatusDraft, github.ActionNone),
+		testRow(6, "CI", github.PRStatusCIFailing, github.ActionFixCI),
+	}
+
+	m.applyFilters()
+
+	got := rowNumbers(m.rows)
+	want := []int{6, 4, 3, 2, 1, 5}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("priority order = %v, want %v", got, want)
+	}
+}
+
+func TestSortKeyCyclesSortMode(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(2, "B", github.PRStatusOpen, github.ActionNone),
+		testRow(1, "A", github.PRStatusOpen, github.ActionNone),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("s"))
+
+	if m.sortMode != SortGitHub {
+		t.Fatalf("sort mode after s = %q, want %q", m.sortMode, SortGitHub)
+	}
+	if got, want := rowNumbers(m.rows), []int{2, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("GitHub order = %v, want %v", got, want)
+	}
+
+	m = sendKey(t, m, textKeyPress("s"))
+
+	if m.sortMode != SortRepo {
+		t.Fatalf("sort mode after second s = %q, want %q", m.sortMode, SortRepo)
+	}
+
+	for _, want := range []SortMode{SortPR, SortTitle, SortDateDesc, SortDateAsc, SortPriority} {
+		m = sendKey(t, m, textKeyPress("s"))
+		if m.sortMode != want {
+			t.Fatalf("sort mode after cycle = %q, want %q", m.sortMode, want)
+		}
+	}
+}
+
+func TestDateSortModesUseUpdatedAt(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	rows := []PRRow{
+		testRowWithUpdatedAt(1, "Old", now.Add(-3*time.Hour)),
+		testRowWithUpdatedAt(2, "New", now.Add(-1*time.Hour)),
+		testRowWithUpdatedAt(3, "Middle", now.Add(-2*time.Hour)),
+	}
+
+	sortRows(rows, SortDateDesc)
+	if got, want := rowNumbers(rows), []int{2, 3, 1}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date newest order = %v, want %v", got, want)
+	}
+
+	sortRows(rows, SortDateAsc)
+	if got, want := rowNumbers(rows), []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date oldest order = %v, want %v", got, want)
+	}
+}
+
+// TestDateSortModesPushZeroTimestampsLast ensures that rows whose CreatedAt
+// and UpdatedAt are both zero (e.g. cached SAML placeholders from older cache
+// files that predate the timestamp fields) are sorted to the bottom in both
+// directions instead of leading the "oldest" view.
+func TestDateSortModesPushZeroTimestampsLast(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC)
+	rows := []PRRow{
+		testRowWithUpdatedAt(1, "Has time A", now.Add(-2*time.Hour)),
+		testRowWithUpdatedAt(2, "No time", time.Time{}),
+		testRowWithUpdatedAt(3, "Has time B", now.Add(-1*time.Hour)),
+	}
+	rows[1].PR.CreatedAt = time.Time{}
+
+	sortRows(rows, SortDateAsc)
+	if got, want := rowNumbers(rows), []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date oldest order with zero ts = %v, want %v", got, want)
+	}
+
+	sortRows(rows, SortDateDesc)
+	if got, want := rowNumbers(rows), []int{3, 1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("date newest order with zero ts = %v, want %v", got, want)
+	}
+}
+
+func TestRenderTableShowsCreatedAndUpdatedColumns(t *testing.T) {
+	createdAt := time.Date(2026, 5, 14, 9, 30, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 16, 11, 45, 0, 0, time.UTC)
+	row := testRowWithUpdatedAt(1, "Dates are visible", updatedAt)
+	row.PR.CreatedAt = createdAt
+
+	m := Model{
+		styles: NewStyles("default"),
+		width:  180,
+		height: 40,
+		rows:   []PRRow{row},
+	}
+	rendered := m.renderTable()
+
+	for _, want := range []string{"Created At", "Updated At", formatTableTime(createdAt), formatTableTime(updatedAt)} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered table missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestSlashSearchCtrlCStillQuits(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Fix payment retry", github.PRStatusCIFailing, github.ActionFixCI),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("/"))
+	if !m.searchActive {
+		t.Fatal("search should be active after pressing /")
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	if _, ok := updated.(Model); !ok {
+		t.Fatalf("Update returned %T, want Model", updated)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c during search should return a quit command, got nil")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Fatalf("ctrl+c during search returned %v, want tea.Quit", msg)
+	}
+}
+
+func TestSlashSearchFiltersRows(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.allRows = []PRRow{
+		testRow(1, "Fix payment retry", github.PRStatusCIFailing, github.ActionFixCI),
+		testRow(2, "Document defaults", github.PRStatusWaitingForReviews, github.ActionNone),
+	}
+	m.applyFilters()
+
+	m = sendKey(t, m, textKeyPress("/"))
+	m = sendKey(t, m, textKeyPress("d"))
+	m = sendKey(t, m, textKeyPress("o"))
+	m = sendKey(t, m, textKeyPress("c"))
+	m = sendKey(t, m, specialKeyPress(tea.KeyEnter))
+
+	if m.searchActive {
+		t.Fatal("search should close after enter")
+	}
+	if m.searchQuery != "doc" {
+		t.Fatalf("search query = %q, want %q", m.searchQuery, "doc")
+	}
+	if got, want := rowNumbers(m.rows), []int{2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered rows = %v, want %v", got, want)
+	}
+	if !strings.Contains(m.View().Content, "[sort: priority | query: author:@me is:open | search: doc]") {
+		t.Fatal("view should render active sort and search metadata")
+	}
+}
+
+func testRowWithUpdatedAt(number int, title string, updatedAt time.Time) PRRow {
+	row := testRow(number, title, github.PRStatusOpen, github.ActionNone)
+	row.PR.UpdatedAt = updatedAt
+	return row
+}
+
+func testRow(number int, title string, status github.PRStatus, action github.Action) PRRow {
+	return PRRow{
+		PR: github.PR{
+			Number:            number,
+			Title:             title,
+			RepoNameWithOwner: "petems/pr-wrangler",
+			State:             github.PRStateOpen,
+		},
+		Status:  status,
+		Action:  action,
+		RowType: RowTypePR,
+	}
+}
+
+func rowNumbers(rows []PRRow) []int {
+	out := make([]int, len(rows))
+	for i, row := range rows {
+		out[i] = row.PR.Number
+	}
+	return out
+}
+
 func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
 	m := Model{}
 
@@ -373,10 +647,11 @@ func TestSelection_PageDownWithNoRowsStaysNonNegative(t *testing.T) {
 
 func TestSelection_LoadedRowsClampNegativeSelection(t *testing.T) {
 	progressCh := make(chan tea.Msg)
-	m := Model{selected: -1, progressCh: progressCh}
+	m := Model{selected: -1, progressCh: progressCh, fetchSequence: 1}
 
 	updated, _ := m.Update(prsLoadedMsg{
 		progressCh: progressCh,
+		fetchID:    1,
 		prs: []github.PR{
 			{Number: 1, Title: "Open PR", State: github.PRStateOpen},
 		},

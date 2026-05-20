@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	gh "github.com/google/go-github/v72/github"
 )
@@ -121,6 +122,8 @@ func extractSAMLAuthURL(ssoHeader, message string) string {
 type searchResult struct {
 	Number            int
 	RepoNameWithOwner string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // EffectiveQuery returns the search string we hand to the GitHub Search API
@@ -152,7 +155,9 @@ func (c *GHClient) searchPRs(ctx context.Context, query string) ([]searchResult,
 
 		for _, issue := range issueResult.Issues {
 			sr := searchResult{
-				Number: issue.GetNumber(),
+				Number:    issue.GetNumber(),
+				CreatedAt: issue.GetCreatedAt().Time,
+				UpdatedAt: issue.GetUpdatedAt().Time,
 			}
 
 			// Extract owner/repo from the repository URL
@@ -190,6 +195,8 @@ func (c *GHClient) fetchPRDetail(ctx context.Context, owner, repo string, number
 		MergedAt:          pr.MergedAt.GetTime(),
 		IsDraft:           pr.GetDraft(),
 		RepoNameWithOwner: owner + "/" + repo,
+		CreatedAt:         pr.GetCreatedAt().Time,
+		UpdatedAt:         pr.GetUpdatedAt().Time,
 	}
 
 	// Distinguish merged PRs from closed ones
@@ -467,6 +474,12 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 				ch <- indexedPR{idx: idx, err: err, repoInfo: sr}
 				return
 			}
+			if pr.CreatedAt.IsZero() {
+				pr.CreatedAt = sr.CreatedAt
+			}
+			if pr.UpdatedAt.IsZero() {
+				pr.UpdatedAt = sr.UpdatedAt
+			}
 
 			ch <- indexedPR{idx: idx, pr: pr, repoInfo: sr}
 		}(i, sr)
@@ -493,6 +506,8 @@ func (c *GHClient) FetchPRs(ctx context.Context, query string, progress func(don
 				Index:             result.idx,
 				RepoNameWithOwner: result.repoInfo.RepoNameWithOwner,
 				PRNumber:          result.repoInfo.Number,
+				CreatedAt:         result.repoInfo.CreatedAt,
+				UpdatedAt:         result.repoInfo.UpdatedAt,
 				Err:               result.samlErr,
 			}
 			done++

@@ -12,6 +12,21 @@ For product framing, see [`README.md`](./README.md); for codebase guidelines
 and the async message-flow contract in agent terms, see
 [`CLAUDE.md`](./CLAUDE.md).
 
+## Product Context
+
+`pr-wrangler` is for open-source maintainers and engineers who work across many
+repositories and keep several pull requests in flight at once. They use it to
+scan PR state quickly, understand what needs attention, and launch focused
+agentic fixes or review follow-up sessions without leaving the terminal.
+
+The product personality is fast, playful, and confident. It should feel like a
+capable terminal operations cockpit with a deliberately silly "PR Wrangler"
+streak: talking bull moments, lasso references, Western-flavored loading states,
+and fun motion are welcome when they support the workflow.
+
+Good references are agentic CLI tools and playful terminal apps such as
+`agent-of-empires`: useful first, but willing to be memorable.
+
 ## Design Intent
 
 `pr-wrangler` is a terminal-first PR operations cockpit. It exists to make
@@ -40,13 +55,14 @@ rather than inventing new layers.
 **Dashboard** (persistent)
 
 1. Cowsay header + title
-2. Query warning line (only when the resolved query differs from the user's
+2. Metadata line showing sort mode, configured query, and active search
+3. Query warning line (only when the resolved query differs from the user's
    expectation)
-3. PR table — fixed columns plus a flexible title column
-4. Page indicator
-5. Error line (only when `lastError != nil`)
-6. Notification line (transient; cleared on next state change)
-7. Help line (one-line key reminder)
+4. PR table — fixed columns plus a flexible title column
+5. Page indicator
+6. Error line (only when `lastError != nil`)
+7. Notification line (transient; cleared on next state change)
+8. Help line or active `/` search prompt
 
 **Overlays** (rendered on top, intercept input)
 
@@ -61,6 +77,12 @@ the dashboard does not handle it.
 
 - **Keyboard-first.** Every action has a visible binding in the one-line
   help footer and in the `?` overlay. Mouse handling is not a goal.
+- **Priority-first triage.** The default table order is action priority:
+  fix CI, rebase/resolve conflicts, address feedback or review comments,
+  approved mergeable PRs, then waiting/open/draft work. Users can cycle to
+  non-priority sort orders with `s`, including newest and oldest updated PRs.
+- **Search narrows the work queue.** `/` opens a Vim-style search prompt that
+  filters visible rows by repo, PR number, title, branch, status, or action.
 - **Stable selection.** Refresh (`r`) preserves the selected row when
   possible; this is part of the `prsLoadedMsg` contract.
 - **Async work belongs in `tea.Cmd`.** The `Update` loop must never block.
@@ -77,15 +99,25 @@ the dashboard does not handle it.
 `pr-wrangler` uses semantic palette **tokens**, not raw hex. The tokens come
 from `ColorScheme` in [`internal/tui/styles.go`](./internal/tui/styles.go):
 
-| Token        | Role                                              |
-| ------------ | ------------------------------------------------- |
-| `Primary`    | Title, banner, selection indicator                |
-| `Secondary`  | Loading spinner, progress bar, help section heads |
-| `Error`      | Error messages, failed-CI status                  |
-| `Warning`    | Warnings, query banner                            |
-| `Help`       | Help text, muted labels                           |
-| `SelectedBg` | Background of the selected row                    |
-| `TableText`  | Base table foreground                             |
+| Token        | Role                                               |
+| ------------ | -------------------------------------------------- |
+| `Primary`    | Title, banner, selection indicator                 |
+| `Secondary`  | Loading spinner, progress bar, help section heads  |
+| `Error`      | Error messages, failed-CI status and fix-CI action |
+| `Warning`    | Warnings, query banner                             |
+| `Success`    | Approved/merged states and merge actions           |
+| `Info`       | Waiting/open/investigate/SAML informational states |
+| `Review`     | Review-comment and feedback states/actions         |
+| `Conflict`   | Merge-conflict states/actions                      |
+| `Draft`      | Draft states                                       |
+| `Help`       | Help text, muted labels                            |
+| `Border`     | Table border and structural chrome                 |
+| `Header`     | Table header text                                  |
+| `Repo`       | Repository column text                             |
+| `Number`     | PR number column text                              |
+| `TitleText`  | PR title column text                               |
+| `SelectedBg` | Background of the selected row                     |
+| `TableText`  | Base table foreground                              |
 
 Themes are listed in `ThemeNames`: `default`, `dracula`, `solarized`, `nord`.
 Each entry in `colorSchemes` must populate every token.
@@ -98,12 +130,15 @@ Each entry in `colorSchemes` must populate every token.
 - New themes must populate every field and must be checked through the
   preview pipeline before they ship — including a contrast pass against the
   `Help` and `Error` colors, which are the easiest to mis-tune.
+- Column color is structural, not decorative. Repository, PR number, title,
+  created-at, updated-at, status, and action columns can use distinct token
+  colors to improve scanning, but the text labels remain the source of truth.
 - Bold is a primary cue, not a decoration. Reserve it for selection,
   banners, and section heads.
 
 ## Layout & Responsiveness
 
-- Fixed columns reserve roughly 82 cols of horizontal space; the title
+- Fixed columns reserve roughly 110 cols of horizontal space; the title
   column absorbs the remainder via `titleColumnWidth()` in
   [`internal/tui/model.go`](./internal/tui/model.go).
 - Page size is derived from terminal height. `pageBounds()` keeps the

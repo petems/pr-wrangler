@@ -117,7 +117,7 @@ func TestAcceptanceConfiguredQueryIsUsedForFiltering(t *testing.T) {
 	if len(fetcher.Queries) != 1 || fetcher.Queries[0] != "review-requested:@me is:open" {
 		t.Fatalf("fetch query = %v, want configured query", fetcher.Queries)
 	}
-	assertViewContains(t, m, "[query: review-requested:@me is:open]")
+	assertViewContains(t, m, "query: review-requested:@me is:open")
 	assertViewContains(t, m, "Add billing export")
 }
 
@@ -136,13 +136,13 @@ func TestAcceptancePartialSAMLErrorRendersPlaceholder(t *testing.T) {
 
 func TestAcceptanceLoadingStateRendersProgress(t *testing.T) {
 	m := newAcceptanceTestModel(t, &MockPRFetcher{}, config.DefaultConfig())
-	started := prsFetchStartedMsg{progressCh: make(chan tea.Msg)}
+	started := prsFetchStartedMsg{progressCh: make(chan tea.Msg), fetchID: m.fetchSequence}
 	updated, _ := m.Update(started)
 	m = updated.(Model)
 	assertViewContains(t, m, "Searching for PRs...")
 	assertViewContains(t, m, "First Load might take a bit longer")
 
-	updated, _ = m.Update(prsProgressMsg{progressCh: started.progressCh, done: 2, total: 4})
+	updated, _ = m.Update(prsProgressMsg{progressCh: started.progressCh, fetchID: m.fetchSequence, done: 2, total: 4})
 	m = updated.(Model)
 	assertViewContains(t, m, "2/4 PRs")
 }

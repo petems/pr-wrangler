@@ -156,5 +156,7 @@ type SAMLErrorEntry struct {
 	Index             int
 	RepoNameWithOwner string
 	PRNumber          int
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	Err               *SAMLAuthError
 }
