@@ -1876,3 +1876,32 @@ func TestSelection_LeftWithNoRowsStaysNonNegative(t *testing.T) {
 		t.Errorf("selected after left with no rows: got %d, want 0", m.selected)
 	}
 }
+
+func TestSelection_LeftRightBlockedWhileHelpOpen(t *testing.T) {
+	m := NewModel(nil, nil, nil, nil, config.DefaultConfig())
+	m.height = 40
+	m.width = 140
+	m.allRows = make([]PRRow, 10)
+	for i := range m.allRows {
+		m.allRows[i] = PRRow{PR: github.PR{Number: i + 1}, RowType: RowTypePR}
+	}
+	m.rows = m.allRows
+	m.selected = 1
+	m.showHelp = true
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyLeft))
+	if m.selected != 1 {
+		t.Errorf("selected changed after left with help open: got %d, want 1", m.selected)
+	}
+	if !m.showHelp {
+		t.Errorf("help overlay closed after left key, want still open")
+	}
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyRight))
+	if m.selected != 1 {
+		t.Errorf("selected changed after right with help open: got %d, want 1", m.selected)
+	}
+	if !m.showHelp {
+		t.Errorf("help overlay closed after right key, want still open")
+	}
+}

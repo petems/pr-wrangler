@@ -1650,7 +1650,7 @@ var helpEntries = []helpEntry{
 	{"/", "/", "search", "search visible rows"},
 	{"s", "s", "sort", "cycle sort order"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
-	{"←/→", "← / → / pgup / pgdn", "page", "jump one page back/forward in the PR list"},
+	{"←/→", "← / → / pgup / pgdown", "page", "jump one page back/forward in the PR list"},
 	{"v", "v", "switch view", "open the view picker to switch between configured views"},
 	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
