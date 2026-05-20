@@ -1827,3 +1827,52 @@ func TestConfiguredQuery_UsesActiveViewIndex(t *testing.T) {
 		t.Errorf("negative index should return \"\", got %q", got)
 	}
 }
+
+func TestSelection_LeftRightPageNavigation(t *testing.T) {
+	m := Model{height: 40, width: 140}
+	m.allRows = make([]PRRow, 100)
+	for i := range m.allRows {
+		m.allRows[i] = PRRow{PR: github.PR{Number: i + 1}, RowType: RowTypePR}
+	}
+	m.rows = m.allRows
+	step := m.tablePageSize()
+	if step < 1 {
+		t.Fatalf("tablePageSize returned %d, want >= 1", step)
+	}
+
+	// Right jumps forward by one page.
+	m = sendKey(t, m, specialKeyPress(tea.KeyRight))
+	if m.selected != step {
+		t.Errorf("selected after right: got %d, want %d", m.selected, step)
+	}
+
+	// Left jumps back.
+	m = sendKey(t, m, specialKeyPress(tea.KeyLeft))
+	if m.selected != 0 {
+		t.Errorf("selected after left: got %d, want 0", m.selected)
+	}
+
+	// Left at top clamps to 0.
+	m = sendKey(t, m, specialKeyPress(tea.KeyLeft))
+	if m.selected != 0 {
+		t.Errorf("selected after left at top: got %d, want 0", m.selected)
+	}
+
+	// Right past the end clamps to last row.
+	for i := 0; i < 50; i++ {
+		m = sendKey(t, m, specialKeyPress(tea.KeyRight))
+	}
+	if m.selected != len(m.rows)-1 {
+		t.Errorf("selected after over-scrolling right: got %d, want %d", m.selected, len(m.rows)-1)
+	}
+}
+
+func TestSelection_LeftWithNoRowsStaysNonNegative(t *testing.T) {
+	m := Model{}
+
+	m = sendKey(t, m, specialKeyPress(tea.KeyLeft))
+
+	if m.selected != 0 {
+		t.Errorf("selected after left with no rows: got %d, want 0", m.selected)
+	}
+}

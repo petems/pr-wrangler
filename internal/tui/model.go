@@ -474,13 +474,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.rows) > 0 {
 				m.selected = len(m.rows) - 1
 			}
-		case "pgup", "ctrl+u":
+		case "pgup", "ctrl+u", "left":
 			step := m.tablePageSize()
 			m.selected -= step
 			if m.selected < 0 {
 				m.selected = 0
 			}
-		case "pgdown", "ctrl+d":
+		case "pgdown", "ctrl+d", "right":
 			step := m.tablePageSize()
 			m.selected += step
 			if len(m.rows) == 0 {
@@ -1650,6 +1650,7 @@ var helpEntries = []helpEntry{
 	{"/", "/", "search", "search visible rows"},
 	{"s", "s", "sort", "cycle sort order"},
 	{"j/k", "j / k / ↑ / ↓", "navigate", "move selection up/down"},
+	{"←/→", "← / → / pgup / pgdn", "page", "jump one page back/forward in the PR list"},
 	{"v", "v", "switch view", "open the view picker to switch between configured views"},
 	{"t", "t", "theme", "Change colour scheme"},
 	{"?", "?", "help", "toggle help"},
