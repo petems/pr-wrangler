@@ -10,14 +10,7 @@ Start with `README.md` for the product overview, local requirements, and config 
 - `internal/tui`: Bubble Tea model, commands, and styles
 - `internal/session`: local session/history persistence
 
-Keep tests next to the code they cover, using `*_test.go`. The `docs/` directory is available for design notes and supporting documentation.
-
-## Design Context
-
-See [`PRODUCT.md`](./PRODUCT.md) for the canonical design context: target
-users, brand personality, aesthetic direction, and design principles. The
-visual system, palette, and validation pipeline are documented in
-[`DESIGN.md`](./DESIGN.md).
+Keep tests next to the code they cover, using `*_test.go`. The `docs/` directory is available for design notes and supporting documentation. For product framing (users, brand personality, design principles) see [`PRODUCT.md`](./PRODUCT.md); for the TUI visual system, palette, and validation pipeline see [`DESIGN.md`](./DESIGN.md).
 
 ## Build, Test, and Development Commands
 
